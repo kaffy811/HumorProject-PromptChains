@@ -1,8 +1,13 @@
 import Link from "next/link";
 import { requireSuperadmin } from "@/lib/auth";
-import { ThemeToggle } from "@/components/ThemeToggle";
+import { signedUrls } from "@/lib/data";
+import { serviceClient } from "@/lib/supabase/service";
+import { NavLinks } from "@/components/NavLinks";
+import { UserMenu } from "@/components/UserMenu";
 export default async function ToolLayout({ children }: { children: React.ReactNode }) {
   const me = await requireSuperadmin();
+  const avatars = me.avatarPath ? await signedUrls(serviceClient(), "humor-avatars", [me.avatarPath], 3600) : {};
+  const adminUrl = process.env.HUMOR_ADMIN_URL?.startsWith("https://") ? process.env.HUMOR_ADMIN_URL : null;
   return (
     <>
       <header className="topbar">
@@ -10,13 +15,10 @@ export default async function ToolLayout({ children }: { children: React.ReactNo
           <span className="brand-mark">h.</span>
           <span>Prompt Chain Tool<small>Superadmin</small></span>
         </Link>
-        <nav className="topbar-nav" aria-label="Sections">
-          <Link className="nav-link" href="/">Prompt chains</Link>
-        </nav>
+        <NavLinks />
         <div className="topbar-end">
-          <ThemeToggle />
-          <span className="who">{me.email ?? me.username ?? me.id}</span>
-          <form action="/auth/signout" method="post"><button className="btn btn-sm" type="submit">Sign out</button></form>
+          <UserMenu name={me.name ?? (me.username ? `@${me.username}` : me.email ?? "Superadmin")} email={me.email}
+            avatarUrl={me.avatarPath ? avatars[me.avatarPath] ?? null : null} adminUrl={adminUrl} />
         </div>
       </header>
       <main className="main">{children}</main>

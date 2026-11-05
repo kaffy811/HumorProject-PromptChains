@@ -117,3 +117,53 @@ void (async () => {
   assert.equal(parseCaptions('{"captions":[" "]}').ok, false);
   console.log("PASS model connectors and caption parsing.");
 })().catch((error) => { console.error(error); process.exit(1); });
+
+// Phase 1: flow diagram edges, model override, dashboard stats.
+import { flowEdges, estimateTokens } from "../lib/flow";
+import { withModelOverride } from "../lib/chain-rules";
+import { runStats } from "../lib/stats";
+{
+  const f = (include_image: boolean, user_prompt: string, output_kind = "text") => ({ include_image, user_prompt, output_kind });
+  // The example chain: photo → 1 → 2 → 3 → captions.
+  assert.deepEqual(flowEdges([f(true, "Describe {direction}"), f(false, "{previous}"), f(false, "{previous}", "captions")]).map((e) => `${e.from}>${e.to}:${e.kind}`),
+    ["0>1:photo", "1>2:previous", "2>3:previous", "3>4:result"]);
+  // {step1} two steps later arcs over; a step with no data link still shows run order.
+  assert.deepEqual(flowEdges([f(true, "x"), f(true, "unrelated"), f(false, "{step1} and {previous}", "captions")]).map((e) => `${e.from}>${e.to}:${e.kind}`),
+    ["0>1:photo", "0>2:photo", "1>3:step", "2>3:previous", "3>4:result", "1>2:order"]);
+  // References that point forwards (after a bad reorder) draw nothing; duplicates collapse.
+  assert.deepEqual(flowEdges([f(false, "{step2} {previous}"), f(false, "{previous} {step1}")]).map((e) => `${e.from}>${e.to}:${e.kind}`), ["1>2:previous", "2>3:result"]);
+  assert.deepEqual(flowEdges([]), []);
+  assert.equal(estimateTokens("abcdefgh"), 2); assert.equal(estimateTokens(""), 0);
+
+  const step = { position: 1, name: "s", user_prompt: "{direction}", output_kind: "captions", include_image: true, llm_model_id: "a", modelLabel: "Gemini", model: { model_id: "gemini-x", is_active: true, supports_vision: true, provider: "google" } };
+  const gpt = { id: "b", model_id: "gpt-x", is_active: true, supports_vision: true, provider: "openai", label: "GPT" };
+  const swapped = withModelOverride([step, { ...step, position: 2 }], gpt);
+  assert.deepEqual(swapped.map((s) => [s.llm_model_id, s.model!.provider, s.modelLabel]), [["b", "openai", "GPT"], ["b", "openai", "GPT"]]);
+  assert.equal(step.llm_model_id, "a", "the chain's own steps are not changed");
+  assert.equal(withModelOverride([step], null)[0], step);
+  const blind = withModelOverride([step], { ...gpt, supports_vision: false });
+  assert.ok(chainProblems(blind, ["google", "openai"]).some((p) => p.blocking && /does not accept images/.test(p.message)), "a text-only override cannot run a photo step");
+
+  const now = new Date("2026-11-05T12:00:00Z");
+  const day = (d: number) => new Date(now.getTime() - d * 86_400_000).toISOString();
+  const runs = [
+    { id: "a", status: "completed", created_at: day(0.1), completed_at: null },
+    { id: "b", status: "completed", created_at: day(1), completed_at: null },
+    { id: "c", status: "failed", created_at: day(2), completed_at: null },
+    { id: "d", status: "running", created_at: day(3), completed_at: null },
+    { id: "e", status: "completed", created_at: day(9), completed_at: null },
+  ];
+  const steps = [
+    { run_id: "a", usage: { total: 100 }, latency_ms: 2000 }, { run_id: "a", usage: { total: 50 }, latency_ms: 1000 },
+    { run_id: "b", usage: { total: 10 }, latency_ms: 5000 }, { run_id: "c", usage: null, latency_ms: 400 }, { run_id: "e", usage: { total: 999 }, latency_ms: 1 },
+  ];
+  const st = runStats(runs, steps, now);
+  assert.equal(st.runsWeek, 4); assert.equal(st.runsLastWeek, 1);
+  assert.equal(st.successRate, 2 / 3, "running runs are not counted as finished");
+  assert.equal(st.tokensWeek, 160, "last week's tokens are excluded");
+  assert.equal(st.medianMs, 4000, "median of completed runs' total model time (3000, 5000)");
+  assert.equal(st.days.length, 7); assert.equal(st.days[6].date, "2026-11-05");
+  assert.equal(st.days.reduce((n, d) => n + d.runs, 0), 4); assert.equal(st.days.find((d) => d.date === "2026-11-03")!.failed, 1);
+  assert.equal(runStats([], [], now).successRate, null);
+  console.log("PASS flow diagram edges, model override and dashboard stats.");
+}

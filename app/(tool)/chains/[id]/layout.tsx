@@ -13,7 +13,7 @@ export default async function ChainLayout({ children, params }: { children: Reac
   const { chain, steps } = found;
   return (
     <div>
-      <Link href="/" className="back">← All prompt chains</Link>
+      <Link href="/chains" className="back">← All prompt chains</Link>
       <header className="page-head" style={{ marginBottom: 16 }}>
         <div>
           <span className="eyebrow">Prompt chain · <span className="mono">{chain.prompt_version}</span> · {steps.length} step{steps.length === 1 ? "" : "s"}</span>

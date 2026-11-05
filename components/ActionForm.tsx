@@ -1,5 +1,5 @@
 "use client";
-import { startTransition, useActionState, useEffect, useRef } from "react";
+import { Fragment, startTransition, useActionState, useState } from "react";
 import type { FormState } from "@/lib/actions";
 
 // Submits by hand so a failed save keeps what was typed (form actions reset
@@ -9,17 +9,18 @@ export function ActionForm({ action, children, className = "form", submit, pendi
   children?: React.ReactNode; className?: string; submit: string; pendingLabel?: string; danger?: boolean; confirm?: string; resetOnOk?: boolean;
 }) {
   const [state, run, pending] = useActionState(action, null);
-  const form = useRef<HTMLFormElement>(null);
-  // A successful "add" clears the form for the next entry.
-  useEffect(() => { if (resetOnOk && state?.ok) form.current?.reset(); }, [state, resetOnOk]);
+  // A successful "add" remounts the fields (controlled ones included) empty.
+  const [seen, setSeen] = useState(state);
+  const [generation, setGeneration] = useState(0);
+  if (seen !== state) { setSeen(state); if (resetOnOk && state?.ok) setGeneration((g) => g + 1); }
   return (
-    <form ref={form} className={className} onSubmit={(e) => {
+    <form className={className} onSubmit={(e) => {
       e.preventDefault();
       if (confirm && !window.confirm(confirm)) return;
       const data = new FormData(e.currentTarget);
       startTransition(() => run(data));
     }}>
-      {children}
+      <Fragment key={generation}>{children}</Fragment>
       {state?.error && <div className="notice notice-bad" role="alert">{state.error}</div>}
       {state?.ok && <div className="notice notice-good" role="status">{state.ok}</div>}
       <div><button className={`btn ${danger ? "btn-danger" : "btn-primary"}`} type="submit" disabled={pending}>{pending ? pendingLabel : submit}</button></div>

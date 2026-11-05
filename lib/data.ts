@@ -80,3 +80,24 @@ export async function signedUrls(db: ServiceClient, bucket: string, paths: (stri
   for (const item of data ?? []) if (item.path && item.signedUrl) result[item.path] = item.signedUrl;
   return result;
 }
+
+// Dashboard: chains, recent runs with thumbnails, and run steps for the stats.
+export async function dashboardData() {
+  const db = serviceClient();
+  const listed = await listChains();
+  const since = new Date(Date.now() - 14 * 86_400_000).toISOString();
+  const [runs, recent] = await Promise.all([
+    db.from("humor_chain_runs").select("id,status,created_at,completed_at").gte("created_at", since).limit(5000),
+    db.from("humor_chain_runs").select("id,chain_id,chain_name,image_path,status,captions,created_at").order("created_at", { ascending: false }).limit(8),
+  ]);
+  const runRows = (runs.data ?? []) as { id: string; status: string; created_at: string; completed_at: string | null }[];
+  const ids = runRows.map((r) => r.id);
+  const steps: { run_id: string; usage: unknown; latency_ms: number | null }[] = [];
+  for (let i = 0; i < ids.length; i += 200) {
+    const { data } = await db.from("humor_chain_run_steps").select("run_id,usage,latency_ms").in("run_id", ids.slice(i, i + 200));
+    steps.push(...((data ?? []) as typeof steps));
+  }
+  const recentRows = (recent.data ?? []) as { id: string; chain_id: string | null; chain_name: string; image_path: string; status: string; captions: unknown; created_at: string }[];
+  const thumbs = await signedUrls(db, "humor-chain-runs", recentRows.map((r) => r.image_path));
+  return { ...listed, runs: runRows, steps, recent: recentRows, thumbs, runsReady: listed.runsReady && !runs.error };
+}

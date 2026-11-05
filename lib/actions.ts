@@ -10,6 +10,7 @@ const dbMessage = (error: { code?: string; message: string }) =>
   error.code === "23505" ? "A chain with that prompt version already exists." : error.message;
 const refresh = (chainId?: string) => {
   revalidatePath("/");
+  revalidatePath("/chains");
   if (chainId) revalidatePath(`/chains/${chainId}`, "layout");
 };
 
@@ -48,7 +49,7 @@ export async function deleteChain(_: FormState, form: FormData): Promise<FormSta
   const { error } = await db.from("humor_prompt_chains").delete().eq("id", id);
   if (error) return { error: error.message };
   refresh();
-  redirect("/?deleted=1");
+  redirect("/chains?deleted=1");
 }
 
 export async function createStep(_: FormState, form: FormData): Promise<FormState> {

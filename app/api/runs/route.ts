@@ -15,6 +15,7 @@ export async function POST(request: NextRequest) {
       direction: String(form.get("direction") ?? ""),
       upload: upload instanceof File && upload.size ? upload : null,
       captionId: String(form.get("caption_id") ?? "") || null,
+      modelOverride: String(form.get("model_override") ?? "") || null,
     });
     return json(result, 201);
   } catch (error) {

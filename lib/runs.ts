@@ -1,8 +1,8 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
 import sharp from "sharp";
-import { chainProblems, fillPrompt, UUID } from "./chain-rules";
-import { getChain } from "./data";
+import { chainProblems, fillPrompt, UUID, withModelOverride } from "./chain-rules";
+import { getChain, modelOptions } from "./data";
 import { callStep, parseCaptions, SUPPORTED_PROVIDERS } from "./llm";
 import { serviceClient } from "./supabase/service";
 import { storageBucket } from "./supabase/schema";
@@ -42,15 +42,23 @@ async function postImage(captionId: string) {
 }
 
 // Creates the run: stores the photo and copies every step's current settings.
-export async function startRun(userId: string, input: { chainId: string; direction: string; upload: File | null; captionId: string | null }) {
+export async function startRun(userId: string, input: { chainId: string; direction: string; upload: File | null; captionId: string | null; modelOverride?: string | null }) {
   if (!UUID.test(input.chainId)) throw new RunError("Unknown prompt chain.");
   const direction = input.direction.trim();
   if ([...direction].length > 120) throw new RunError("Keep the direction under 120 characters.");
   const found = await getChain(input.chainId);
   if (!found) throw new RunError("This prompt chain no longer exists.", 404);
-  const { chain, steps } = found;
+  const { chain } = found;
+  // Optional: every step of this run uses one model (e.g. compare Gemini vs GPT).
+  let override = null;
+  if (input.modelOverride) {
+    if (!UUID.test(input.modelOverride)) throw new RunError("Unknown model.");
+    override = (await modelOptions()).find((m) => m.id === input.modelOverride) ?? null;
+    if (!override) throw new RunError("That model no longer exists.");
+  }
+  const steps = withModelOverride(found.steps, override);
   const blocking = chainProblems(steps, SUPPORTED_PROVIDERS).filter((p) => p.blocking);
-  if (blocking.length) throw new RunError(`Fix the chain first: ${blocking.map((p) => (p.position ? `step ${p.position}: ` : "") + p.message).join(" ")}`);
+  if (blocking.length) throw new RunError(`${override ? `${override.label} cannot run this chain` : "Fix the chain first"}: ${blocking.map((p) => (p.position ? `step ${p.position}: ` : "") + p.message).join(" ")}`);
 
   let raw: Uint8Array;
   if (input.captionId) {

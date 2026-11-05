@@ -22,7 +22,7 @@ const steps = [
 ];
 const T = {
   profiles: [
-    { id: OWNER, username: "owner", is_superadmin: true, is_admin: false },
+    { id: OWNER, username: "owner", first_name: "Hana", last_name: "Lee", display_name: null, avatar_path: null, is_superadmin: true, is_admin: false },
     { id: ADMIN, username: "helper", is_superadmin: false, is_admin: true },
     { id: MEMBER, username: "member", is_superadmin: false, is_admin: false },
   ],
@@ -93,7 +93,7 @@ const ORIGIN = `http://127.0.0.1:${APP_PORT}`;
 try {
   for (let i = 0; i < 60 && !log.includes("Ready"); i++) await new Promise((r) => setTimeout(r, 500));
   const get = (path, headers = {}) => fetch(`${ORIGIN}${path}`, { redirect: "manual", headers });
-  const pages = ["/", `/chains/${CHAIN}`, `/chains/${CHAIN}/run`, `/chains/${CHAIN}/media`, `/runs/${RUN}`];
+  const pages = ["/", "/chains", `/chains/${CHAIN}`, `/chains/${CHAIN}/run`, `/chains/${CHAIN}/media`, `/runs/${RUN}`];
   for (const path of pages) {
     const anon = await get(path);
     assert.equal(anon.status, 307, `anonymous ${path}`); assert.match(anon.headers.get("location"), /\/login/);
@@ -107,10 +107,15 @@ try {
     assert.equal(owner.status, 200, `superadmin ${path}: ${owner.status}\n${log.slice(-2000)}`);
     assert.equal(owner.headers.get("cache-control"), "private, no-store");
   }
-  const list = await (await get("/", { cookie: cookie(OWNER) })).text();
-  assert.match(list, /Describe → funny → five captions/); assert.match(list, /Ready to run/); assert.match(list, /Members/);
+  const dash = await (await get("/", { cookie: cookie(OWNER) })).text();
+  for (const text of ["Hi, Hana", "Runs, last 7 days", "Success rate", "Recent runs", "For members", "Four-style campus captions", "Account menu for Hana Lee"]) assert.match(dash, new RegExp(text), `dashboard: ${text}`);
+  const list = await (await get("/chains", { cookie: cookie(OWNER) })).text();
+  assert.match(list, /Describe → funny → five captions/); assert.match(list, /Ready to run/); assert.match(list, /Members use this/); assert.match(list, /class="mini-flow"/);
+  assert.match(await (await get("/chains?new=1", { cookie: cookie(OWNER) })).text(), /<details class="card" id="new" open=""/, "?new=1 opens the create form");
   const editor = await (await get(`/chains/${CHAIN}`, { cookie: cookie(OWNER) })).text();
-  for (const text of ["Move step 2 up", "Find the funny", "Returns captions", "Delete chain"]) assert.match(editor, new RegExp(text), text);
+  for (const text of ["Move step 2 up", "Find the funny", "Returns captions", "Delete chain", 'class="flow"', "Flow: photo, step 1 Describe the photo"]) assert.match(editor, new RegExp(text), text);
+  const run = await (await get(`/chains/${CHAIN}/run`, { cookie: cookie(OWNER) })).text();
+  assert.match(run, /As set in each step \(Gemini 3.8 Flash · Google Gemini\)/); assert.match(run, /Every step: GPT-6 Astra · OpenAI/);
   const media = await (await get(`/chains/${CHAIN}/media`, { cookie: cookie(OWNER) })).text();
   assert.match(media, /Butler at 2am/); assert.match(media, /Express to nowhere/, "member posts with this version");
   const detail = await (await get(`/runs/${RUN}`, { cookie: cookie(OWNER) })).text();
@@ -137,19 +142,35 @@ try {
       const [name, value] = cookie(OWNER).split(/=(.*)/s);
       await ctx.addCookies([{ name, value, domain: "127.0.0.1", path: "/" }]);
       const page = await ctx.newPage();
-      for (const [label, path] of [["list", "/"], ["editor", `/chains/${CHAIN}`], ["run", `/chains/${CHAIN}/run`], ["media", `/chains/${CHAIN}/media`], ["detail", `/runs/${RUN}`], ["login", "/login"]]) {
+      for (const [label, path] of [["dashboard", "/"], ["list", "/chains"], ["editor", `/chains/${CHAIN}`], ["run", `/chains/${CHAIN}/run`], ["media", `/chains/${CHAIN}/media`], ["detail", `/runs/${RUN}`], ["login", "/login"]]) {
         await page.goto(`${ORIGIN}${path}`);
         await page.screenshot({ path: `${process.env.SCREENSHOTS}/${scheme}-${label}.png`, fullPage: true });
       }
       if (scheme === "light") {
         // Reorder in a real browser: ↓ on step 1 saves through the reorder action.
         await page.goto(`${ORIGIN}/chains/${CHAIN}`);
+        // Live preview: {previous} is valid in step 2; deleting it updates the preview.
+        const edit = page.locator("details", { has: page.locator("summary", { hasText: "Edit step" }) }).nth(1);
+        await edit.locator("summary").click();
+        await edit.locator("mark.ph-ok", { hasText: "{previous}" }).waitFor();
+        await edit.locator("textarea[name=user_prompt]").fill("Use {previous} and {step3}");
+        await edit.locator("mark.ph-bad", { hasText: "{step3}" }).waitFor();
+        await edit.scrollIntoViewIfNeeded();
+        await page.screenshot({ path: `${process.env.SCREENSHOTS}/light-preview.png`, fullPage: true });
+        await page.goto(`${ORIGIN}/chains/${CHAIN}`);
         await page.getByRole("button", { name: "Move step 1 down" }).click();
         await page.getByText("Order saved.").waitFor({ timeout: 10000 });
         // Theme toggle: Dark is remembered and applied before paint on the next page.
+        await page.getByRole("button", { name: /Account menu/ }).click();
+        await page.getByRole("region", { name: "Account" }).waitFor();
+        await page.screenshot({ path: `${process.env.SCREENSHOTS}/light-menu.png` });
+        await page.keyboard.press("Escape");
+        assert.equal(await page.getByRole("region", { name: "Account" }).count(), 0, "Escape closes the menu");
+        await page.getByRole("button", { name: /Account menu/ }).click();
         await page.getByRole("button", { name: "Dark" }).click();
         await page.goto(`${ORIGIN}/`);
         assert.equal(await page.evaluate(() => document.documentElement.dataset.theme), "dark");
+        await page.getByRole("button", { name: /Account menu/ }).click();
         await page.getByRole("button", { name: "System" }).click();
         assert.equal(await page.evaluate(() => document.documentElement.dataset.theme ?? null), null);
       }

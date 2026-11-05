@@ -5,6 +5,7 @@ import { chainProblems, moveStep } from "@/lib/chain-rules";
 import type { ModelOption } from "@/lib/data";
 import { ActionForm } from "@/components/ActionForm";
 import { StepFields, type StepInitial } from "@/components/StepFields";
+import { FlowDiagram } from "@/components/FlowDiagram";
 
 export type ListStep = StepInitial & { modelLabel: string | null; model: { model_id: string; is_active: boolean; supports_vision: boolean; provider: string | null } | null };
 
@@ -43,6 +44,7 @@ export function StepList({ chainId, steps, models, supported }: { chainId: strin
         {saving && <div className="notice">Saving order…</div>}
         {!saving && message && <div className={`notice notice-${message.kind}`} role={message.kind === "bad" ? "alert" : "status"}>{message.text}</div>}
       </div>
+      <FlowDiagram steps={ordered.map((s) => ({ name: s.name, provider: s.model?.provider ?? null, include_image: s.include_image, user_prompt: s.user_prompt, output_kind: s.output_kind }))} />
       {problems.filter((p) => p.position === null).map((p) => (
         <div key={p.message} className={`notice notice-${p.blocking ? "bad" : "warn"}`}>{p.message}</div>
       ))}

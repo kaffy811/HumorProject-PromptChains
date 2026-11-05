@@ -8,7 +8,10 @@ type Caption = { caption: string; style: string };
 
 // Starts a run, then calls each step in turn so its output appears as soon as
 // it is ready. A failed step can be retried without redoing earlier ones.
-export function RunPanel({ chainId, posts, blocked }: { chainId: string; posts: Post[]; blocked: string[] }) {
+type Choice = { id: string; label: string; blocked: string[] };
+export function RunPanel({ chainId, posts, choices }: { chainId: string; posts: Post[]; choices: Choice[] }) {
+  const [modelChoice, setModelChoice] = useState("");
+  const blocked = (choices.find((c) => c.id === modelChoice) ?? choices[0]).blocked;
   const [source, setSource] = useState<"upload" | "post">("upload");
   const [postId, setPostId] = useState<string | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
@@ -38,6 +41,7 @@ export function RunPanel({ chainId, posts, blocked }: { chainId: string; posts: 
     try {
       const data = new FormData(form);
       data.set("chain_id", chainId);
+      if (modelChoice) data.set("model_override", modelChoice); else data.delete("model_override");
       if (source === "post") { data.delete("image"); data.set("caption_id", postId ?? ""); } else data.delete("caption_id");
       const res = await fetch("/api/runs", { method: "POST", body: data });
       const body = await res.json().catch(() => ({ error: "No response." }));
@@ -83,6 +87,13 @@ export function RunPanel({ chainId, posts, blocked }: { chainId: string; posts: 
             ))}
           </div>
         )}
+        <div className="field">
+          <label htmlFor="model_override">Model for this run</label>
+          <select id="model_override" className="select" value={modelChoice} onChange={(e) => setModelChoice(e.target.value)}>
+            {choices.map((c) => <option key={c.id} value={c.id} disabled={c.blocked.length > 0 && c.id !== ""}>{c.label}{c.blocked.length && c.id !== "" ? " (cannot run this chain)" : ""}</option>)}
+          </select>
+          <span className="hint">Try the same chain with Gemini or GPT. Only this run changes; the chain&apos;s steps keep their own models.</span>
+        </div>
         <div className="field">
           <label htmlFor="direction">Direction <span className="muted">(optional)</span></label>
           <input id="direction" name="direction" className="input" maxLength={120} placeholder="e.g. midterms week" />

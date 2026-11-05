@@ -96,3 +96,11 @@ export function moveStep<T>(ids: T[], from: number, to: number): T[] {
   next.splice(to, 0, moved);
   return next;
 }
+
+// "Run every step with this model" on the Generate page: the chain itself is
+// unchanged; only this run's copy of the steps uses the override.
+export type OverrideModel = { id: string; model_id: string; is_active: boolean; supports_vision: boolean; provider: string | null; label: string };
+export function withModelOverride<T extends RuleStep & { llm_model_id: string | null; modelLabel: string | null }>(steps: T[], model: OverrideModel | null): T[] {
+  if (!model) return steps;
+  return steps.map((s) => ({ ...s, llm_model_id: model.id, modelLabel: model.label, model: { model_id: model.model_id, is_active: model.is_active, supports_vision: model.supports_vision, provider: model.provider } }));
+}

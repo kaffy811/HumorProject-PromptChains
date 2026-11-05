@@ -30,7 +30,7 @@ export default async function RunDetail({ params }: { params: Promise<{ runId: s
   return (
     <div className="stack">
       <div>
-        {run.chain_id ? <Link href={`/chains/${run.chain_id}/media`} className="back">← {run.chain_name} · media</Link> : <Link href="/" className="back">← All prompt chains</Link>}
+        {run.chain_id ? <Link href={`/chains/${run.chain_id}/media`} className="back">← {run.chain_name} · media</Link> : <Link href="/chains" className="back">← All prompt chains</Link>}
         <header className="page-head" style={{ marginBottom: 0 }}>
           <div>
             <span className="eyebrow">Run · <span className="mono">{run.prompt_version}</span> · {when(run.created_at)}</span>

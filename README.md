@@ -6,11 +6,12 @@ Superadmin tool for **The Humor Project**: build, order and run the prompt chain
 
 | Page | Week 8 requirement |
 | --- | --- |
-| `/` | **Create** prompt chains; list every chain with its steps, models, number of runs and whether it is ready to run. |
-| `/chains/[id]` | **Update / delete** the chain; **create / update / delete** steps; **reorder** steps with ↑ ↓ or by dragging the ⠿ handle (saved atomically, rolled back on failure). Problems such as a `{previous}` in step 1 after a reorder are shown at once and block runs. |
-| `/chains/[id]/run` | **Generate media**: upload a photo (or reuse a member post's photo), add an optional direction, and run. The browser calls one step per request, so each step's output appears as soon as it is ready; a failed step can be retried without redoing earlier ones. |
+| `/` Dashboard | Runs, success rate and tokens for the last 7 days, runs per day, the chain members use, recent runs and chain cards. |
+| `/chains` | **Create** prompt chains; every chain as a card with its steps as a small flow, colour-coded by provider (Gemini / GPT / mixed), use by members and runs. |
+| `/chains/[id]` | **Update / delete** the chain; **create / update / delete** steps; **reorder** steps with ↑ ↓ or by dragging the ⠿ handle (saved atomically, rolled back on failure). A **flow diagram** (photo → steps → captions, with `{stepN}` and photo inputs drawn as arcs) and the list of problems (such as `{previous}` in step 1) update the moment you reorder. Step forms show a **live preview**: placeholders highlighted green/red, the prompt filled with sample data, a token estimate, and one-click placeholder chips. |
+| `/chains/[id]/run` | **Generate media**: upload a photo (or reuse a member post's photo), add an optional direction, optionally run **every step with one model** (e.g. the same chain on Gemini and on GPT), and run. The browser calls one step per request, so each step's output appears as soon as it is ready; a failed step can be retried without redoing earlier ones. |
 | `/chains/[id]/media`, `/runs/[id]` | **View media produced by this chain**: every run (photo, captions, status) with every step's filled prompt, output, tokens and time; plus member posts generated with the chain's prompt version. |
-| Top bar | **Light / dark / system** theme, remembered per browser and applied before first paint. |
+| Top bar | **Avatar menu** (profile photo or initial, name, email, theme, link to Humor Admin, sign out) with **light / dark / system** theme, remembered per browser and applied before first paint. |
 
 ### How a chain runs
 Each step has a model (Humor Admin → LLM models & providers), a system prompt, a user prompt, whether it **sees the photo**, and whether it **returns text** (passed on) or **captions** (final JSON `{"captions": [...]}`). User prompts can use:
@@ -43,7 +44,7 @@ Until the second one is applied, pages show a notice saying what to run.
 ## Deploy (separate Vercel project)
 
 1. Vercel → Add New → Project → import **kaffy811/HumorProject-PromptChains**. Framework preset: Next.js.
-2. Environment variables (Production + Preview): `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_SECRET_KEY` (secret), `GEMINI_API_KEY` and/or `OPENAI_API_KEY` (secret). Optional: `CHAINS_AUTH_ORIGIN=https://<production domain>`.
+2. Environment variables (Production + Preview): `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_SECRET_KEY` (secret), `GEMINI_API_KEY` and/or `OPENAI_API_KEY` (secret). Optional: `CHAINS_AUTH_ORIGIN=https://<production domain>`, `HUMOR_ADMIN_URL=https://<Humor Admin domain>` (link in the account menu).
 3. Supabase → Authentication → URL Configuration → Redirect URLs: add `https://<tool domain>/auth/callback` (and `https://*-humor-project8.vercel.app/auth/callback` for preview deployments).
 4. Vercel → Settings → Deployment Protection → turn off **Vercel Authentication**, so the page opens in an incognito window (the app's own Google + superadmin gate still protects everything).
 
