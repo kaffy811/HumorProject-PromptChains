@@ -5,7 +5,7 @@ export type SnapshotStep = {
   position: number; name: string; llm_model_id: string | null; system_prompt: string; user_prompt: string;
   output_schema: unknown; include_image: boolean; output_kind: string;
 };
-export type Snapshot = { name: string; prompt_version: string; description: string | null; steps: SnapshotStep[] };
+export type Snapshot = { name: string; prompt_version: string; description: string | null; llm_model_id?: string | null; steps: SnapshotStep[] };
 export type LinePart = { kind: "same" | "added" | "removed"; text: string };
 export type FieldChange = { field: string; before: string; after: string; lines?: LinePart[] };
 export type StepChange =
@@ -19,6 +19,8 @@ export function readSnapshot(value: unknown): Snapshot {
   const steps = Array.isArray(v.steps) ? v.steps : [];
   return {
     name: String(v.name ?? ""), prompt_version: String(v.prompt_version ?? ""), description: v.description == null ? null : String(v.description),
+    // Absent in snapshots from before 202611070001.
+    ...("llm_model_id" in v ? { llm_model_id: v.llm_model_id ? String(v.llm_model_id) : null } : {}),
     steps: steps.map((raw, i) => {
       const s = (raw ?? {}) as Record<string, unknown>;
       return {
@@ -61,6 +63,7 @@ export function diffSnapshots(beforeRaw: unknown, afterRaw: unknown, modelName: 
   field(chain, "Name", before.name, after.name);
   field(chain, "Prompt version", before.prompt_version, after.prompt_version);
   field(chain, "Description", before.description ?? "", after.description ?? "", true);
+  if (before.llm_model_id !== undefined && after.llm_model_id !== undefined) field(chain, "Chain model", modelName(before.llm_model_id), modelName(after.llm_model_id));
   const steps: StepChange[] = [];
   const count = Math.max(before.steps.length, after.steps.length);
   for (let i = 0; i < count; i++) {

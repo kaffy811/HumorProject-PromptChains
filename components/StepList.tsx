@@ -13,7 +13,7 @@ export type ListStep = StepInitial & { modelLabel: string | null; model: { model
 // Steps in run order. Reorder with ↑/↓ (works everywhere, keyboard included) or
 // by dragging the handle; the new order shows at once, is saved atomically and
 // rolls back if the save fails. Problems are recomputed for the new order.
-export function StepList({ chainId, steps, models, supported, sample = null }: { chainId: string; steps: ListStep[]; models: ModelOption[]; supported: string[]; sample?: RunSample | null }) {
+export function StepList({ chainId, steps, model, supported, sample = null }: { chainId: string; steps: ListStep[]; model: ModelOption | null; supported: string[]; sample?: RunSample | null }) {
   const [order, setOrder] = useState(() => steps.map((s) => s.id));
   const [synced, setSynced] = useState(steps);
   const [dragging, setDragging] = useState<number | null>(null);
@@ -85,7 +85,7 @@ export function StepList({ chainId, steps, models, supported, sample = null }: {
                   <summary>Edit step</summary>
                   <div style={{ marginTop: 12 }}>
                     <ActionForm action={updateStep} submit="Save step">
-                      <StepFields chainId={chainId} models={models} initial={step} position={n} sample={sample} />
+                      <StepFields chainId={chainId} model={model} initial={step} position={n} sample={sample} />
                     </ActionForm>
                   </div>
                 </details>

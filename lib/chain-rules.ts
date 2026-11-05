@@ -10,13 +10,15 @@ type Parsed<T> = { ok: true; value: T } | { ok: false; error: string };
 const str = (form: FormData, name: string) => String(form.get(name) ?? "").trim();
 const len = (value: string) => [...value].length;
 
-export type ChainFields = { name: string; prompt_version: string; description: string | null };
+export type ChainFields = { name: string; prompt_version: string; description: string | null; llm_model_id: string | null };
 export function parseChain(form: FormData): Parsed<ChainFields> {
   const name = str(form, "name"), version = str(form, "prompt_version"), description = str(form, "description");
   if (len(name) < 1 || len(name) > 80) return { ok: false, error: "Name must be 1–80 characters." };
   if (!/^[a-z0-9][a-z0-9._-]{1,59}$/.test(version)) return { ok: false, error: "Prompt version must be 2–60 lowercase letters, digits and . _ - (e.g. captions-v4)." };
   if (len(description) > 1000) return { ok: false, error: "Description must be at most 1,000 characters." };
-  return { ok: true, value: { name, prompt_version: version, description: description || null } };
+  const model = str(form, "llm_model_id");
+  if (model && !UUID.test(model)) return { ok: false, error: "Choose a valid model." };
+  return { ok: true, value: { name, prompt_version: version, description: description || null, llm_model_id: model || null } };
 }
 
 export type StepFields = {
@@ -103,4 +105,14 @@ export type OverrideModel = { id: string; model_id: string; is_active: boolean; 
 export function withModelOverride<T extends RuleStep & { llm_model_id: string | null; modelLabel: string | null }>(steps: T[], model: OverrideModel | null): T[] {
   if (!model) return steps;
   return steps.map((s) => ({ ...s, llm_model_id: model.id, modelLabel: model.label, model: { model_id: model.model_id, is_active: model.is_active, supports_vision: model.supports_vision, provider: model.provider } }));
+}
+
+// The chain's model: its own setting, else the model most of its steps use
+// (chains from before 202611070001). mixed = steps disagree with it.
+export function chainModelOf(own: string | null | undefined, steps: { position: number; llm_model_id: string | null }[]) {
+  const counts = new Map<string, number>();
+  for (const s of [...steps].sort((a, b) => a.position - b.position)) if (s.llm_model_id) counts.set(s.llm_model_id, (counts.get(s.llm_model_id) ?? 0) + 1);
+  const common = [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+  const id = own ?? common;
+  return { id, mixed: steps.some((s) => s.llm_model_id !== id) && steps.length > 0 };
 }

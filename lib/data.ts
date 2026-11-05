@@ -1,5 +1,5 @@
 import "server-only";
-import type { RuleStep } from "./chain-rules";
+import { chainModelOf, type RuleStep } from "./chain-rules";
 import { serviceClient, type ServiceClient } from "./supabase/service";
 import { storageBucket } from "./supabase/schema";
 import { copyNames } from "./version-diff";
@@ -9,7 +9,9 @@ export type StepRow = RuleStep & {
   id: string; system_prompt: string; output_schema: unknown; llm_model_id: string | null;
   modelLabel: string | null;
 };
-export type ChainRow = { id: string; name: string; prompt_version: string; description: string | null; created_at: string; updated_at: string; share: number };
+export type ChainRow = { id: string; name: string; prompt_version: string; description: string | null; created_at: string; updated_at: string; share: number;
+  // The chain's model (every step should use it) and whether some step differs.
+  llm_model_id: string | null; mixedModels: boolean };
 
 const STEP_COLUMNS = "id,position,name,llm_model_id,include_image,output_kind,system_prompt,user_prompt,output_schema,humor_llm_models(model_id,display_name,is_active,supports_vision,humor_llm_providers(slug,name))";
 type RawStep = {
@@ -50,15 +52,18 @@ export async function listChains() {
 
 export async function getChain(id: string) {
   const db = serviceClient();
+  // "*" so the page works before migration 202611070001 adds llm_model_id.
   const { data, error } = await db.from("humor_prompt_chains")
-    .select(`id,name,prompt_version,description,created_at,updated_at,humor_prompt_chain_mix(share),humor_prompt_chain_steps(${STEP_COLUMNS})`)
+    .select(`*,humor_prompt_chain_mix(share),humor_prompt_chain_steps(${STEP_COLUMNS})`)
     .eq("id", id).maybeSingle();
   if (error) throw new Error(error.message);
   if (!data) return null;
-  const c = data as unknown as Omit<ChainRow, "share"> & { humor_prompt_chain_mix: unknown; humor_prompt_chain_steps: RawStep[] };
+  const c = data as unknown as Omit<ChainRow, "share" | "mixedModels"> & { humor_prompt_chain_mix: unknown; humor_prompt_chain_steps: RawStep[] };
+  const steps = (c.humor_prompt_chain_steps ?? []).map(toStep).sort((a, b) => a.position - b.position);
+  const model = chainModelOf(c.llm_model_id ?? null, steps);
   return {
-    chain: { id: c.id, name: c.name, prompt_version: c.prompt_version, description: c.description, created_at: c.created_at, updated_at: c.updated_at, share: shareOf(c.humor_prompt_chain_mix) } as ChainRow,
-    steps: (c.humor_prompt_chain_steps ?? []).map(toStep).sort((a, b) => a.position - b.position),
+    chain: { id: c.id, name: c.name, prompt_version: c.prompt_version, description: c.description, created_at: c.created_at, updated_at: c.updated_at, share: shareOf(c.humor_prompt_chain_mix), llm_model_id: model.id, mixedModels: model.mixed } as ChainRow,
+    steps,
   };
 }
 
