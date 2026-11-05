@@ -6,7 +6,8 @@ import { chainModelOf, MAX_STEPS, parseChain, parseStep, UUID } from "./chain-ru
 import { saveVersion } from "./versions";
 import { serviceClient } from "./supabase/service";
 
-export type FormState = { error?: string; ok?: string } | null;
+// id: the record a create made (the canvas selects a new step).
+export type FormState = { error?: string; ok?: string; id?: string } | null;
 const dbMessage = (error: { code?: string; message: string }) =>
   error.code === "23505" ? "A chain with that prompt version already exists." : error.message;
 const refresh = (chainId?: string) => {
@@ -117,15 +118,24 @@ export async function createStep(_: FormState, form: FormData): Promise<FormStat
   const parsed = parseStep(form);
   if (!parsed.ok) return { error: parsed.error };
   const db = serviceClient(me.id);
-  const { data: existing, error: read } = await db.from("humor_prompt_chain_steps").select("position").eq("chain_id", chainId);
+  const { data: existing, error: read } = await db.from("humor_prompt_chain_steps").select("id,position").eq("chain_id", chainId).order("position");
   if (read) return { error: read.message };
-  if ((existing ?? []).length >= MAX_STEPS) return { error: `A chain can have at most ${MAX_STEPS} steps.` };
-  const position = Math.max(0, ...(existing ?? []).map((s) => s.position as number)) + 1;
-  const { error } = await db.from("humor_prompt_chain_steps").insert({ ...parsed.value, llm_model_id: await chainModel(db, chainId), chain_id: chainId, position });
+  const list = (existing ?? []) as { id: string; position: number }[];
+  if (list.length >= MAX_STEPS) return { error: `A chain can have at most ${MAX_STEPS} steps.` };
+  // Added at the end, then moved into place when inserted between steps (canvas "+").
+  const at = Number(form.get("insert_at") || list.length + 1);
+  const target = Number.isInteger(at) && at >= 1 && at <= list.length ? at : list.length + 1;
+  const position = Math.max(0, ...list.map((s) => s.position)) + 1;
+  const { data: created, error } = await db.from("humor_prompt_chain_steps")
+    .insert({ ...parsed.value, llm_model_id: await chainModel(db, chainId), chain_id: chainId, position }).select("id").single();
   if (error) return { error: error.code === "23503" ? "This prompt chain no longer exists." : error.message };
-  await saveVersion(db, chainId, `Added step ${position} (${parsed.value.name})`, me.id);
+  const ids = list.map((s) => s.id);
+  ids.splice(target - 1, 0, created.id);
+  const { error: moved } = await db.rpc("humor_reorder_prompt_chain_steps", { chain: chainId, step_ids: ids });
+  if (moved) return { error: `Step added, but it could not be moved into place: ${moved.message}` };
+  await saveVersion(db, chainId, `Added step ${target} (${parsed.value.name})`, me.id);
   refresh(chainId);
-  return { ok: `Step ${position} added.` };
+  return { ok: `Step ${target} added.`, id: created.id };
 }
 
 export async function updateStep(_: FormState, form: FormData): Promise<FormState> {

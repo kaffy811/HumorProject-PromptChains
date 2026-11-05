@@ -2,14 +2,12 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireSuperadmin } from "@/lib/auth";
-import { createStep, deleteChain, duplicateChain, updateChain } from "@/lib/actions";
+import { deleteChain, duplicateChain, updateChain } from "@/lib/actions";
 import { copySuggestion, getChain, latestRunSample, modelOptions } from "@/lib/data";
-import { MAX_STEPS } from "@/lib/chain-rules";
 import { SUPPORTED_PROVIDERS } from "@/lib/llm";
 import { ActionForm } from "@/components/ActionForm";
 import { ChainFields } from "@/components/ChainFields";
-import { StepFields } from "@/components/StepFields";
-import { StepList } from "@/components/StepList";
+import { ChainCanvas } from "@/components/ChainCanvas";
 export const metadata: Metadata = { title: "Edit chain" };
 
 export default async function EditChain({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ created?: string; copied?: string }> }) {
@@ -25,7 +23,7 @@ export default async function EditChain({ params, searchParams }: { params: Prom
   const usedModels = new Set(steps.map((s) => s.llm_model_id ?? "none")).size;
   return (
     <div className="stack">
-      {created && <div className="notice notice-good" role="status">Chain created. {model ? "Add its steps below." : "Choose its model, then add its steps."}</div>}
+      {created && <div className="notice notice-good" role="status">Chain created. {model ? "Add its first step with ＋ Add step below." : "Choose its model, then add its steps with ＋ Add step."}</div>}
       {copied && <div className="notice notice-good" role="status">Copy created with all its steps. Members are not using it; its history starts here.</div>}
       <section className="card" id="settings">
         <div className="card-head">
@@ -75,21 +73,15 @@ export default async function EditChain({ params, searchParams }: { params: Prom
           <ChainFields initial={chain} models={models} needsVision={seeing} />
         </ActionForm>
       </section>
-      <section className="card">
-        <h2>Steps</h2>
-        <p className="sub">They run top to bottom on {model ? <strong>{model.label}</strong> : "the chain's model"}. Step 1 usually sees the photo; later steps use earlier output through <span className="mono">{"{previous}"}</span> or <span className="mono">{"{stepN}"}</span>. Reorder with ↑ ↓ or drag the ⠿ handle; the order is saved immediately.</p>
-        <StepList chainId={chain.id} steps={steps} model={model} supported={SUPPORTED_PROVIDERS} sample={sample} />
-      </section>
-      <details className="card" open={!steps.length}>
-        <summary style={{ fontWeight: 800 }}>+ Add step {steps.length + 1}</summary>
-        <div style={{ marginTop: 14 }}>
-          {steps.length >= MAX_STEPS ? <p className="empty">A chain can have at most {MAX_STEPS} steps.</p> : (
-            <ActionForm action={createStep} submit="Add step" pendingLabel="Adding…" resetOnOk>
-              <StepFields chainId={chain.id} model={model} position={steps.length + 1} sample={sample} />
-            </ActionForm>
-          )}
+      <section className="card canvas-card">
+        <div className="card-head" style={{ marginBottom: 10 }}>
+          <div>
+            <h2>Steps</h2>
+            <p className="sub" style={{ margin: 0 }}>Click a step to edit it on the right. Scroll or pinch to zoom, drag the background to move around, <b>+</b> on an arrow inserts a step there, and each step&apos;s ⋯ menu moves it left or right. Every step runs on {model ? <strong>{model.label}</strong> : "the chain's model"}.</p>
+          </div>
         </div>
-      </details>
+        <ChainCanvas chainId={chain.id} steps={steps} model={model} supported={SUPPORTED_PROVIDERS} sample={sample} />
+      </section>
     </div>
   );
 }

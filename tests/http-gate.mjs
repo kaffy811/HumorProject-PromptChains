@@ -57,16 +57,24 @@ const cookie = (sub, method) => {
 // A 1×1 grey PNG for every signed image URL.
 const PIXEL = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mN8+P9/PQAJYwPZm3oQZQAAAABJRU5ErkJggg==", "base64");
 
-const supa = http.createServer((req, res) => {
+const writes = [];
+const supa = http.createServer(async (req, res) => {
   const url = new URL(req.url, "http://localhost");
+  if (process.env.DEBUG_MOCK) console.error("mock", req.method, req.url);
   const send = (status, body, headers = {}) => { res.writeHead(status, { "content-type": "application/json", ...headers }); res.end(JSON.stringify(body)); };
+  let raw = "";
+  if (req.method !== "GET" && req.method !== "HEAD") {
+    for await (const chunk of req) raw += chunk;
+    writes.push({ method: req.method, path: url.pathname, body: raw ? (() => { try { return JSON.parse(raw); } catch { return raw; } })() : null });
+    if (req.method === "POST" && url.pathname === "/rest/v1/humor_prompt_chain_steps") return send(201, { id: "11111111-1111-4111-8111-100000000099" });
+  }
   if (url.pathname === "/auth/v1/user") {
     const token = (req.headers.authorization || "").replace("Bearer ", "");
     return token.split(".").length === 3 ? send(200, userFor(token)) : send(401, { message: "bad jwt" });
   }
   if (url.pathname.startsWith("/storage/v1/object/sign/")) {
-    let body = ""; req.on("data", (c) => (body += c));
-    return req.on("end", () => { const paths = JSON.parse(body || "{}").paths ?? []; send(200, paths.map((path) => ({ path, signedURL: `/object/pixel?p=${encodeURIComponent(path)}`, error: null }))); });
+    const paths = JSON.parse(raw || "{}").paths ?? [];
+    return send(200, paths.map((path) => ({ path, signedURL: `/object/pixel?p=${encodeURIComponent(path)}`, error: null })));
   }
   if (url.pathname === "/storage/v1/object/pixel") { res.writeHead(200, { "content-type": "image/png" }); return res.end(PIXEL); }
   if (url.pathname.startsWith("/storage/")) return send(200, []);
@@ -120,8 +128,8 @@ try {
   assert.match(list, /Describe → funny → five captions/); assert.match(list, /Ready to run/); assert.match(list, /Members use this/); assert.match(list, /class="mini-flow"/);
   assert.match(await (await get("/chains?new=1", { cookie: cookie(OWNER) })).text(), /<details class="card" id="new" open=""/, "?new=1 opens the create form");
   const editor = await (await get(`/chains/${CHAIN}`, { cookie: cookie(OWNER) })).text();
-  for (const text of ["Move step 2 up", "Find the funny", "Returns captions", "Delete chain", 'class="flow"', "Flow: photo, step 1 Describe the photo"]) assert.match(editor, new RegExp(text), text);
-  for (const text of ["Chain settings", "Save settings", "Duplicate", "demo-three-step-v1-copy", "Test this step", "History", "set for the whole chain"]) assert.match(editor, new RegExp(text), text);
+  for (const text of ["Steps in run order", "Step 2: Find the funny", "returns captions", "Delete chain", "Click a step to edit it"]) assert.match(editor, new RegExp(text), text);
+  for (const text of ["Chain settings", "Save settings", "Duplicate", "demo-three-step-v1-copy", "History"]) assert.match(editor, new RegExp(text), text);
   const history = await (await get(`/chains/${CHAIN}/history`, { cookie: cookie(OWNER) })).text();
   for (const text of ["Version 1 → 2", "Edited step 2", "Write a joke.", "Write a short observational comedy bit.", "Hana Lee", "migration", "vs current", "Restore"]) assert.match(history, new RegExp(text), `history: ${text}`);
   const run = await (await get(`/chains/${CHAIN}/run`, { cookie: cookie(OWNER) })).text();
@@ -161,27 +169,62 @@ try {
         await page.screenshot({ path: `${process.env.SCREENSHOTS}/${scheme}-${label}.png`, fullPage: true });
       }
       if (scheme === "light") {
-        // Reorder in a real browser: ↓ on step 1 saves through the reorder action.
+        // Canvas: click a step → the side panel opens with its prompts; the preview marks placeholders.
         await page.goto(`${ORIGIN}/chains/${CHAIN}`);
-        // Live preview: {previous} is valid in step 2; deleting it updates the preview.
-        const edit = page.locator("details", { has: page.locator("summary", { hasText: "Edit step" }) }).nth(1);
-        await edit.locator("summary").first().click();
-        await edit.locator("mark.ph-ok", { hasText: "{previous}" }).waitFor();
-        await edit.locator("textarea[name=user_prompt]").fill("Use {previous} and {step3}");
-        await edit.locator("mark.ph-bad", { hasText: "{step3}" }).waitFor();
-        await edit.scrollIntoViewIfNeeded();
-        await page.screenshot({ path: `${process.env.SCREENSHOTS}/light-preview.png`, fullPage: true });
-        // Test this step: prefilled from the latest run, one call (no key here, so the provider error shows).
+        const node = (n) => page.locator(".react-flow__node-step").nth(n - 1);
+        await node(2).locator(".cnode-title").click();
+        const panel = page.locator(".chain-panel");
+        await panel.getByRole("heading", { name: "Find the funny" }).waitFor();
+        assert.equal(await panel.locator("select[name=llm_model_id]").count(), 0, "no model picker in the step editor");
+        await panel.locator("mark.ph-ok", { hasText: "{previous}" }).waitFor();
+        await panel.getByRole("textbox", { name: "User prompt" }).fill("Use {previous} and {step3}");
+        await panel.locator("mark.ph-bad", { hasText: "{step3}" }).waitFor();
+        await panel.getByText("Unsaved", { exact: true }).waitFor();
+        await page.screenshot({ path: `${process.env.SCREENSHOTS}/light-canvas-panel.png` });
+        // Ctrl/⌘+S saves; inputs insert at the cursor; ⤢ opens the big editor.
+        await panel.getByRole("button", { name: "{direction}" }).click();
+        assert.match(await panel.getByRole("textbox", { name: "User prompt" }).inputValue(), /\{direction\}/);
+        await panel.getByRole("button", { name: "Expand the system prompt" }).click();
+        await page.getByRole("dialog", { name: "System prompt" }).waitFor();
+        await page.getByRole("button", { name: "Done" }).click();
+        writes.length = 0;
+        await page.keyboard.press("Control+s");
+        await panel.getByText("Step saved.").waitFor({ timeout: 10000 });
+        const patch = writes.find((w) => w.method === "PATCH" && w.path.endsWith("humor_prompt_chain_steps"));
+        assert.ok(patch && /\{direction\}/.test(patch.body.user_prompt) && !("llm_model_id" in patch.body), "saved prompt, never the model");
+        // Switching steps with unsaved changes asks first.
+        await panel.getByRole("textbox", { name: "User prompt" }).fill("Changed again {previous}");
+        await page.getByRole("button", { name: "Fit" }).click();
+        await page.waitForTimeout(300);
+        page.once("dialog", (d) => d.dismiss());
+        await node(1).locator(".cnode-title").click();
+        await panel.getByRole("heading", { name: "Find the funny" }).waitFor();
+        // Test this step from the node's ▶: prefilled from the latest run (no key here, so the provider error shows).
         await page.goto(`${ORIGIN}/chains/${CHAIN}`);
-        const step2 = page.locator("details", { has: page.locator("summary", { hasText: "Edit step" }) }).nth(1);
-        await step2.locator("summary").first().click();
-        const tryBox = step2.locator("details.try");
-        await tryBox.locator("summary").click();
+        await page.getByRole("button", { name: "Test step 2" }).click();
+        const tryBox = page.locator(".chain-panel details.try");
+        await tryBox.locator("textarea").first().waitFor();
         assert.match(await tryBox.locator("textarea").first().inputValue(), /asleep face-down/, "earlier output prefilled from the latest run");
         await tryBox.getByRole("button", { name: "Run this step" }).click();
         await tryBox.getByText(/GEMINI_API_KEY is not set/).waitFor({ timeout: 15000 });
-        await tryBox.scrollIntoViewIfNeeded();
-        await page.screenshot({ path: `${process.env.SCREENSHOTS}/light-try.png`, fullPage: true });
+        await page.screenshot({ path: `${process.env.SCREENSHOTS}/light-try.png` });
+        // "+" on an arrow inserts a step there: created, then moved into place in one reorder.
+        await page.goto(`${ORIGIN}/chains/${CHAIN}`);
+        await page.getByRole("button", { name: "Insert a step before step 2" }).click();
+        await panel.getByRole("heading", { name: "New step 2" }).waitFor();
+        await panel.getByLabel("Step name").fill("Pick the best angle");
+        await panel.getByRole("textbox", { name: "System prompt" }).fill("You are a comedy editor.");
+        await panel.getByRole("textbox", { name: "User prompt" }).fill("From {previous}, pick one angle. {direction}");
+        writes.length = 0;
+        await panel.getByRole("button", { name: "Add step" }).click();
+        await page.waitForFunction(() => !document.querySelector(".chain-panel"), null, { timeout: 10000 });
+        const reorder = writes.find((w) => w.path.endsWith("humor_reorder_prompt_chain_steps"));
+        assert.equal(reorder?.body.step_ids[1], "11111111-1111-4111-8111-100000000099", "the new step is moved to position 2");
+        // Zoom from the toolbar.
+        const zoomLabel = page.getByLabel("Zoom level");
+        const before = await zoomLabel.textContent();
+        await page.getByRole("button", { name: "Zoom out" }).click();
+        await page.waitForFunction((b) => document.querySelector("[aria-label='Zoom level']")?.textContent !== b, before);
         // Model for every step and duplicate go through their actions.
         await page.goto(`${ORIGIN}/chains/${CHAIN}`);
         assert.equal(await page.locator("select[name=llm_model_id]").count(), 1, "the model is chosen once, in Chain settings");
@@ -197,8 +240,10 @@ try {
         page.once("dialog", (d) => d.accept());
         await page.getByRole("button", { name: "Restore" }).click();
         await page.getByText("Restored version 1; saved as version 3.").waitFor({ timeout: 10000 });
+        // Reorder from a step's ⋯ menu.
         await page.goto(`${ORIGIN}/chains/${CHAIN}`);
-        await page.getByRole("button", { name: "Move step 1 down" }).click();
+        await page.getByRole("button", { name: "Step 1 menu" }).click();
+        await page.getByRole("menuitem", { name: "Move step 1 right" }).click();
         await page.getByText("Order saved.").waitFor({ timeout: 10000 });
         // Theme toggle: Dark is remembered and applied before paint on the next page.
         await page.getByRole("button", { name: /Account menu/ }).click();
@@ -213,6 +258,14 @@ try {
         await page.getByRole("button", { name: /Account menu/ }).click();
         await page.getByRole("button", { name: "System" }).click();
         assert.equal(await page.evaluate(() => document.documentElement.dataset.theme ?? null), null);
+      }
+      if (scheme === "dark") {
+        // Phone width: the step editor covers the screen.
+        await page.setViewportSize({ width: 390, height: 844 });
+        await page.goto(`${ORIGIN}/chains/${CHAIN}`);
+        await page.locator(".react-flow__node-step").first().locator(".cnode-title").click();
+        await page.locator(".chain-panel").waitFor();
+        await page.screenshot({ path: `${process.env.SCREENSHOTS}/dark-phone-panel.png` });
       }
       await ctx.close();
     }
