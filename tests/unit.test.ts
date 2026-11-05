@@ -167,3 +167,31 @@ import { runStats } from "../lib/stats";
   assert.equal(runStats([], [], now).successRate, null);
   console.log("PASS flow diagram edges, model override and dashboard stats.");
 }
+
+// Version history: line diff, snapshot diff, summaries and copy names.
+import { copyNames, diffSnapshots, lineDiff, readSnapshot, snapshotSummary } from "../lib/version-diff";
+{
+  assert.deepEqual(lineDiff("a\nb\nc", "a\nB\nc\nd"), [{ kind: "same", text: "a" }, { kind: "removed", text: "b" }, { kind: "added", text: "B" }, { kind: "same", text: "c" }, { kind: "added", text: "d" }]);
+  assert.deepEqual(lineDiff("same", "same"), [{ kind: "same", text: "same" }]);
+  const st = (position: number, extra = {}) => ({ position, name: `S${position}`, llm_model_id: "g", system_prompt: "sys", user_prompt: "u {direction}", output_schema: null, include_image: position === 1, output_kind: position === 3 ? "captions" : "text", ...extra });
+  const v1 = { name: "Campus", prompt_version: "campus-v4", description: null, steps: [st(1), st(2), st(3)] };
+  const names = (id: string | null) => ({ g: "Gemini", o: "GPT" } as Record<string, string>)[id ?? ""] ?? "no model";
+  assert.equal(diffSnapshots(v1, v1, names).same, true);
+  const v2 = { ...v1, name: "Campus 2", steps: [st(1, { llm_model_id: "o" }), st(2, { user_prompt: "u {direction}\nmore" })] };
+  const d = diffSnapshots(v1, v2, names);
+  assert.deepEqual(d.chain.map((c) => [c.field, c.before, c.after]), [["Name", "Campus", "Campus 2"]]);
+  assert.deepEqual(d.steps.map((s) => [s.kind, s.position]), [["changed", 1], ["changed", 2], ["removed", 3]]);
+  const first = d.steps[0] as Extract<typeof d.steps[number], { kind: "changed" }>;
+  assert.deepEqual(first.fields.map((f) => [f.field, f.before, f.after]), [["Model", "Gemini", "GPT"]]);
+  const second = d.steps[1] as Extract<typeof d.steps[number], { kind: "changed" }>;
+  assert.deepEqual(second.fields[0].lines?.map((l) => l.kind), ["same", "added"]);
+  assert.equal(diffSnapshots(v2, v1, names).steps.at(-1)!.kind, "added");
+  assert.deepEqual(readSnapshot(null), { name: "", prompt_version: "", description: null, steps: [] }, "malformed snapshot reads as empty");
+  assert.equal(readSnapshot({ steps: [{ position: 2 }, { position: 1, include_image: false }] }).steps[0].include_image, false, "steps sorted by position");
+  assert.equal(snapshotSummary(v1, names), "3 steps · Gemini"); assert.equal(snapshotSummary(v2, names), "2 steps · GPT + Gemini");
+  assert.deepEqual(copyNames("Campus", "campus-v4", []), { name: "Campus (copy)", prompt_version: "campus-v4-copy" });
+  assert.deepEqual(copyNames("Campus", "campus-v4", ["campus-v4-copy"]), { name: "Campus (copy 2)", prompt_version: "campus-v4-copy2" });
+  const long = copyNames("x", "a".repeat(60), []);
+  assert.ok(/^[a-z0-9][a-z0-9._-]{1,59}$/.test(long.prompt_version), "copy version stays valid");
+  console.log("PASS version diff, summaries and copy names.");
+}

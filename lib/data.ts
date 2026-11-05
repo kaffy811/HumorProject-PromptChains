@@ -2,6 +2,7 @@ import "server-only";
 import type { RuleStep } from "./chain-rules";
 import { serviceClient, type ServiceClient } from "./supabase/service";
 import { storageBucket } from "./supabase/schema";
+import { copyNames } from "./version-diff";
 
 export type ModelOption = { id: string; label: string; model_id: string; provider: string | null; providerName: string | null; is_active: boolean; supports_vision: boolean };
 export type StepRow = RuleStep & {
@@ -100,4 +101,23 @@ export async function dashboardData() {
   const recentRows = (recent.data ?? []) as { id: string; chain_id: string | null; chain_name: string; image_path: string; status: string; captions: unknown; created_at: string }[];
   const thumbs = await signedUrls(db, "humor-chain-runs", recentRows.map((r) => r.image_path));
   return { ...listed, runs: runRows, steps, recent: recentRows, thumbs, runsReady: listed.runsReady && !runs.error };
+}
+
+// Default name and prompt version for "Duplicate chain".
+export async function copySuggestion(name: string, version: string) {
+  const { data } = await serviceClient().from("humor_prompt_chains").select("prompt_version");
+  return copyNames(name, version, (data ?? []).map((c) => c.prompt_version as string));
+}
+
+// Text outputs of this chain's latest run, by position, so a step can be
+// tried on real earlier output. Also whether that run's photo can be reused.
+export async function latestRunSample(chainId: string) {
+  const db = serviceClient();
+  const { data: run } = await db.from("humor_chain_runs").select("id,direction,created_at").eq("chain_id", chainId).order("created_at", { ascending: false }).limit(1).maybeSingle();
+  if (!run) return null;
+  const { data: steps } = await db.from("humor_chain_run_steps").select("position,output,status").eq("run_id", run.id).order("position");
+  return {
+    runId: run.id as string, direction: (run.direction as string | null) ?? "", createdAt: run.created_at as string,
+    outputs: ((steps ?? []) as { position: number; output: string | null; status: string }[]).reduce<(string | null)[]>((list, s) => { list[s.position - 1] = s.status === "completed" ? s.output : null; return list; }, []),
+  };
 }

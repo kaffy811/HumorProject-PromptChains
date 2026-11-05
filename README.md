@@ -9,6 +9,8 @@ Superadmin tool for **The Humor Project**: build, order and run the prompt chain
 | `/` Dashboard | Runs, success rate and tokens for the last 7 days, runs per day, the chain members use, recent runs and chain cards. |
 | `/chains` | **Create** prompt chains; every chain as a card with its steps as a small flow, colour-coded by provider (Gemini / GPT / mixed), use by members and runs. |
 | `/chains/[id]` | **Update / delete** the chain; **create / update / delete** steps; **reorder** steps with ↑ ↓ or by dragging the ⠿ handle (saved atomically, rolled back on failure). A **flow diagram** (photo → steps → captions, with `{stepN}` and photo inputs drawn as arcs) and the list of problems (such as `{previous}` in step 1) update the moment you reorder. Step forms show a **live preview**: placeholders highlighted green/red, the prompt filled with sample data, a token estimate, and one-click placeholder chips. |
+| `/chains/[id]` (phase 2) | **Test this step** inside every step form: runs that one step as the form shows it (saved or not) with a direction, a photo (or the latest run's photo) and editable earlier outputs for `{previous}` / `{stepN}`, prefilled from the chain's latest run. One model call; nothing is saved. **Model for every step** switches the whole chain to one model in one save (e.g. Gemini → GPT for the chain members use). **Duplicate chain** copies it and its steps under a new prompt version. |
+| `/chains/[id]/history` | **Version history**: a numbered version is saved after every change (details, step add/edit/delete, reorder, model switch, restore), with who and when. Line-by-line diff between any version and the one before it or the current one; **Restore** puts an earlier version back in one transaction, keeping the current state as a version. |
 | `/chains/[id]/run` | **Generate media**: upload a photo (or reuse a member post's photo), add an optional direction, optionally run **every step with one model** (e.g. the same chain on Gemini and on GPT), and run. The browser calls one step per request, so each step's output appears as soon as it is ready; a failed step can be retried without redoing earlier ones. |
 | `/chains/[id]/media`, `/runs/[id]` | **View media produced by this chain**: every run (photo, captions, status) with every step's filled prompt, output, tokens and time; plus member posts generated with the chain's prompt version. |
 | Top bar | **Avatar menu** (profile photo or initial, name, email, theme, link to Humor Admin, sign out) with **light / dark / system** theme, remembered per browser and applied before first paint. |
@@ -20,11 +22,11 @@ Each step has a model (Humor Admin → LLM models & providers), a system prompt,
 - `{previous}`: the output of the step before
 - `{stepN}`: the output of step N (must run earlier)
 
-Example (seeded as `demo-three-step-v1`): 1. describe the photo (sees photo, text) → 2. write a comedy bit from `{previous}` (text) → 3. turn `{previous}` into five captions (captions).
+Example (seeded as `campus-captions-v4`, the chain members use): 1. look at the photo (sees photo, text) → 2. find five comic angles from `{previous}` (text) → 3. write four captions in four styles from `{step1}` and `{previous}` (captions).
 
 Connectors: Gemini (`provider slug google`, `GEMINI_API_KEY`) and OpenAI (`openai`, `OPENAI_API_KEY`, Chat Completions with image input). A run copies every step's settings when it starts, so editing the chain later never rewrites history; runs survive deleting the chain. Runs never create member posts.
 
-The member app still runs **single-step** chains only (Humor Admin → Model for members); a multi-step chain falls back to the built-in prompt there.
+Members get the one chain chosen in Humor Admin → Model for members. The member app runs chains of up to 4 steps (earlier steps return text, the last returns the four captions); anything it cannot run falls back to the built-in Gemini prompt. To move members between Gemini and GPT, use **Model for every step** on that chain.
 
 ## Security
 
@@ -39,7 +41,10 @@ Needs these migrations from kaffy811/HumorProject, applied in the Supabase SQL e
 1. `supabase/migrations/202610280001_admin_catalog.sql` (chains, steps, models; already applied)
 2. `supabase/migrations/202611050001_prompt_chain_tool.sql`: step `include_image` / `output_kind`, the atomic `humor_reorder_prompt_chain_steps()` function, `humor_chain_runs` / `humor_chain_run_steps`, the private `humor-chain-runs` bucket and the example chain.
 
-Until the second one is applied, pages show a notice saying what to run.
+3. `supabase/migrations/202611060001_member_three_step_chain.sql`: the members' three-step chain (replaces the earlier chains).
+4. `supabase/migrations/202611060002_prompt_chain_versions.sql`: version history, restore and duplicate.
+
+Until the second one is applied, pages show a notice saying what to run; History shows its own notice until the fourth one is applied (edits still work without it).
 
 ## Deploy (separate Vercel project)
 
@@ -54,7 +59,7 @@ Until the second one is applied, pages show a notice saying what to run.
 npm ci
 cp .env.example .env.local   # fill in keys
 npm run dev                   # http://localhost:3020
-npm test                      # gate, validation, placeholders, reorder, problems, connectors
+npm test                      # gate, validation, placeholders, reorder, problems, connectors, version diff
 npm run lint && npx tsc --noEmit
 npm run test:e2e              # builds against a local fake Supabase and checks every route's gate
 ```

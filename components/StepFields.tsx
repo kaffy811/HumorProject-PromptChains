@@ -3,6 +3,7 @@ import { useRef, useState } from "react";
 import { fillPrompt, PLACEHOLDER } from "@/lib/chain-rules";
 import type { ModelOption } from "@/lib/data";
 import { estimateTokens } from "@/lib/flow";
+import { StepTry, type RunSample } from "@/components/StepTry";
 
 export type StepInitial = {
   id: string; name: string; llm_model_id: string | null; include_image: boolean; output_kind: string;
@@ -12,7 +13,7 @@ export type StepInitial = {
 // Fields of one step (add and edit forms), with a live preview of the user
 // prompt: placeholders highlighted (red when this step cannot use them) and
 // filled with sample data, plus a rough token count.
-export function StepFields({ chainId, models, initial, position }: { chainId: string; models: ModelOption[]; initial?: StepInitial; position: number }) {
+export function StepFields({ chainId, models, initial, position, sample = null }: { chainId: string; models: ModelOption[]; initial?: StepInitial; position: number; sample?: RunSample | null }) {
   const [kind, setKind] = useState(initial?.output_kind ?? "text");
   const [system, setSystem] = useState(initial?.system_prompt ?? "");
   const [user, setUser] = useState(initial?.user_prompt ?? "");
@@ -75,6 +76,7 @@ export function StepFields({ chainId, models, initial, position }: { chainId: st
           <span className="hint">The model must return {"{\"captions\": [...]}"}; a schema makes it stricter.</span>
         </div>
       )}
+      <StepTry position={position} template={user} sees={sees} sample={sample} />
     </div>
   );
 }

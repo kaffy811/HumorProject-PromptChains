@@ -35,6 +35,11 @@ const T = {
     captions: [{ caption: "Butler at 2am: where dreams go to study.", style: "deadpan" }, { caption: "Peak academic weapon, powered by vending machine coffee.", style: "roast" }, { caption: "Booked and very busy.", style: "pun" }, { caption: "Hi tired, I'm dad.", style: "dad joke" }, { caption: "The library chair has filed for custody.", style: "absurd" }] }],
   humor_chain_run_steps: steps.map((s, i) => ({ run_id: RUN, position: s.position, name: s.name, provider: "google", model: "gemini-3.8-flash", include_image: s.include_image, output_kind: s.output_kind, status: "completed", system_prompt: s.system_prompt, user_prompt_template: s.user_prompt, user_prompt: s.user_prompt.replace("{direction}", "midterms week").replace("{previous}", "(previous output)"), usage: { input: 900 - i * 300, output: 120, total: 1020 - i * 300 }, latency_ms: 4200 - i * 1500,
     output: ["A student is asleep face-down on a desk in Butler Library, surrounded by open textbooks and an empty coffee cup.", "Nothing says midterms like Butler at 2am: the coffee is empty, the textbooks are open, and the only thing studying is the desk.", '{"captions":[{"caption":"Butler at 2am: where dreams go to study.","style":"deadpan"}]}'][i] })),
+  humor_prompt_chain_steps: steps.map((s) => ({ ...s, chain_id: CHAIN })),
+  humor_prompt_chain_versions: [
+    { id: "11111111-1111-4111-8111-300000000002", chain_id: CHAIN, version: 2, label: "Edited step 2 (Find the funny)", created_by: OWNER, created_at: now, snapshot: { name: "Describe → funny → five captions", prompt_version: "demo-three-step-v1", description: null, steps: steps.map((s) => ({ ...s, llm_model_id: M1 })) } },
+    { id: "11111111-1111-4111-8111-300000000001", chain_id: CHAIN, version: 1, label: "Version before history was kept", created_by: null, created_at: now, snapshot: { name: "Describe → funny → five captions", prompt_version: "demo-three-step-v1", description: null, steps: steps.map((s, i) => ({ ...s, llm_model_id: M1, user_prompt: i === 1 ? "Photo description:\n{previous}\n\nWrite a joke." : s.user_prompt })) } },
+  ],
   humor_captions: [{ id: P1, content: "When the 1 train is the only thing on time", deleted_at: null, image_id: "i1", source: "ai", humor_images: { storage_path: "u/i1.webp", status: "ready" } }],
   humor_generations: [{ id: "g1", image_id: "i1", image_path: "u/i1.png", status: "completed", prompt_version: "demo-three-step-v1", created_at: now, caption_candidates: [{ text: "When the 1 train is the only thing on time" }, { text: "Express to nowhere" }] }],
 };
@@ -65,6 +70,8 @@ const supa = http.createServer((req, res) => {
   }
   if (url.pathname === "/storage/v1/object/pixel") { res.writeHead(200, { "content-type": "image/png" }); return res.end(PIXEL); }
   if (url.pathname.startsWith("/storage/")) return send(200, []);
+  if (url.pathname === "/rest/v1/rpc/humor_duplicate_prompt_chain") return send(200, CHAIN);
+  if (url.pathname === "/rest/v1/rpc/humor_restore_prompt_chain_version") return send(200, 3);
   if (url.pathname.startsWith("/rest/v1/rpc/")) return send(200, null);
   if (url.pathname.startsWith("/rest/v1/")) {
     const table = url.pathname.split("/").pop();
@@ -93,7 +100,7 @@ const ORIGIN = `http://127.0.0.1:${APP_PORT}`;
 try {
   for (let i = 0; i < 60 && !log.includes("Ready"); i++) await new Promise((r) => setTimeout(r, 500));
   const get = (path, headers = {}) => fetch(`${ORIGIN}${path}`, { redirect: "manual", headers });
-  const pages = ["/", "/chains", `/chains/${CHAIN}`, `/chains/${CHAIN}/run`, `/chains/${CHAIN}/media`, `/runs/${RUN}`];
+  const pages = ["/", "/chains", `/chains/${CHAIN}`, `/chains/${CHAIN}/run`, `/chains/${CHAIN}/media`, `/chains/${CHAIN}/history`, `/runs/${RUN}`];
   for (const path of pages) {
     const anon = await get(path);
     assert.equal(anon.status, 307, `anonymous ${path}`); assert.match(anon.headers.get("location"), /\/login/);
@@ -114,6 +121,9 @@ try {
   assert.match(await (await get("/chains?new=1", { cookie: cookie(OWNER) })).text(), /<details class="card" id="new" open=""/, "?new=1 opens the create form");
   const editor = await (await get(`/chains/${CHAIN}`, { cookie: cookie(OWNER) })).text();
   for (const text of ["Move step 2 up", "Find the funny", "Returns captions", "Delete chain", 'class="flow"', "Flow: photo, step 1 Describe the photo"]) assert.match(editor, new RegExp(text), text);
+  for (const text of ["Model for every step", "Duplicate chain", "demo-three-step-v1-copy", "Test this step", "History"]) assert.match(editor, new RegExp(text), text);
+  const history = await (await get(`/chains/${CHAIN}/history`, { cookie: cookie(OWNER) })).text();
+  for (const text of ["Version 1 → 2", "Edited step 2", "Write a joke.", "Write a short observational comedy bit.", "Hana Lee", "migration", "vs current", "Restore"]) assert.match(history, new RegExp(text), `history: ${text}`);
   const run = await (await get(`/chains/${CHAIN}/run`, { cookie: cookie(OWNER) })).text();
   assert.match(run, /As set in each step \(Gemini 3.8 Flash · Google Gemini\)/); assert.match(run, /Every step: GPT-6 Astra · OpenAI/);
   const media = await (await get(`/chains/${CHAIN}/media`, { cookie: cookie(OWNER) })).text();
@@ -129,6 +139,10 @@ try {
   const missing = await post("/api/runs", OWNER, ORIGIN);
   assert.equal(missing.status, 400); assert.match((await missing.json()).error, /Unknown prompt chain/);
   assert.equal((await post(`/api/runs/not-a-run/steps/1`, OWNER, ORIGIN)).status, 400);
+  assert.equal((await post("/api/steps/try", ADMIN, ORIGIN)).status, 403, "admins cannot test steps");
+  assert.equal((await post("/api/steps/try", OWNER, "https://evil.example")).status, 403);
+  const tryEmpty = await post("/api/steps/try", OWNER, ORIGIN);
+  assert.equal(tryEmpty.status, 400); assert.match((await tryEmpty.json()).error, /Step name/);
   const login = await get("/login");
   assert.equal(login.status, 200); assert.equal(login.headers.get("x-robots-tag"), "noindex, nofollow");
   assert.match(await login.text(), /localStorage.getItem\(&quot;theme&quot;\)|localStorage\.getItem\("theme"\)/, "theme applied before paint");
@@ -142,7 +156,7 @@ try {
       const [name, value] = cookie(OWNER).split(/=(.*)/s);
       await ctx.addCookies([{ name, value, domain: "127.0.0.1", path: "/" }]);
       const page = await ctx.newPage();
-      for (const [label, path] of [["dashboard", "/"], ["list", "/chains"], ["editor", `/chains/${CHAIN}`], ["run", `/chains/${CHAIN}/run`], ["media", `/chains/${CHAIN}/media`], ["detail", `/runs/${RUN}`], ["login", "/login"]]) {
+      for (const [label, path] of [["dashboard", "/"], ["list", "/chains"], ["editor", `/chains/${CHAIN}`], ["run", `/chains/${CHAIN}/run`], ["media", `/chains/${CHAIN}/media`], ["history", `/chains/${CHAIN}/history`], ["detail", `/runs/${RUN}`], ["login", "/login"]]) {
         await page.goto(`${ORIGIN}${path}`);
         await page.screenshot({ path: `${process.env.SCREENSHOTS}/${scheme}-${label}.png`, fullPage: true });
       }
@@ -151,12 +165,35 @@ try {
         await page.goto(`${ORIGIN}/chains/${CHAIN}`);
         // Live preview: {previous} is valid in step 2; deleting it updates the preview.
         const edit = page.locator("details", { has: page.locator("summary", { hasText: "Edit step" }) }).nth(1);
-        await edit.locator("summary").click();
+        await edit.locator("summary").first().click();
         await edit.locator("mark.ph-ok", { hasText: "{previous}" }).waitFor();
         await edit.locator("textarea[name=user_prompt]").fill("Use {previous} and {step3}");
         await edit.locator("mark.ph-bad", { hasText: "{step3}" }).waitFor();
         await edit.scrollIntoViewIfNeeded();
         await page.screenshot({ path: `${process.env.SCREENSHOTS}/light-preview.png`, fullPage: true });
+        // Test this step: prefilled from the latest run, one call (no key here, so the provider error shows).
+        await page.goto(`${ORIGIN}/chains/${CHAIN}`);
+        const step2 = page.locator("details", { has: page.locator("summary", { hasText: "Edit step" }) }).nth(1);
+        await step2.locator("summary").first().click();
+        const tryBox = step2.locator("details.try");
+        await tryBox.locator("summary").click();
+        assert.match(await tryBox.locator("textarea").first().inputValue(), /asleep face-down/, "earlier output prefilled from the latest run");
+        await tryBox.getByRole("button", { name: "Run this step" }).click();
+        await tryBox.getByText(/GEMINI_API_KEY is not set/).waitFor({ timeout: 15000 });
+        await tryBox.scrollIntoViewIfNeeded();
+        await page.screenshot({ path: `${process.env.SCREENSHOTS}/light-try.png`, fullPage: true });
+        // Model for every step and duplicate go through their actions.
+        await page.goto(`${ORIGIN}/chains/${CHAIN}`);
+        await page.locator("#every-model").selectOption({ label: "GPT-6 Astra · OpenAI" });
+        await page.getByRole("button", { name: "Use for every step" }).click();
+        await page.getByText(/now use GPT-6 Astra|already uses/).waitFor({ timeout: 10000 });
+        await page.getByRole("button", { name: "Duplicate" }).click();
+        await page.waitForURL(/\?copied=1/, { timeout: 10000 });
+        await page.getByText("Copy created with all its steps").waitFor();
+        await page.goto(`${ORIGIN}/chains/${CHAIN}/history`);
+        page.once("dialog", (d) => d.accept());
+        await page.getByRole("button", { name: "Restore" }).click();
+        await page.getByText("Restored version 1; saved as version 3.").waitFor({ timeout: 10000 });
         await page.goto(`${ORIGIN}/chains/${CHAIN}`);
         await page.getByRole("button", { name: "Move step 1 down" }).click();
         await page.getByText("Order saved.").waitFor({ timeout: 10000 });

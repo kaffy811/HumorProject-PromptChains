@@ -5,6 +5,7 @@ import { chainProblems, moveStep } from "@/lib/chain-rules";
 import type { ModelOption } from "@/lib/data";
 import { ActionForm } from "@/components/ActionForm";
 import { StepFields, type StepInitial } from "@/components/StepFields";
+import type { RunSample } from "@/components/StepTry";
 import { FlowDiagram } from "@/components/FlowDiagram";
 
 export type ListStep = StepInitial & { modelLabel: string | null; model: { model_id: string; is_active: boolean; supports_vision: boolean; provider: string | null } | null };
@@ -12,7 +13,7 @@ export type ListStep = StepInitial & { modelLabel: string | null; model: { model
 // Steps in run order. Reorder with ↑/↓ (works everywhere, keyboard included) or
 // by dragging the handle; the new order shows at once, is saved atomically and
 // rolls back if the save fails. Problems are recomputed for the new order.
-export function StepList({ chainId, steps, models, supported }: { chainId: string; steps: ListStep[]; models: ModelOption[]; supported: string[] }) {
+export function StepList({ chainId, steps, models, supported, sample = null }: { chainId: string; steps: ListStep[]; models: ModelOption[]; supported: string[]; sample?: RunSample | null }) {
   const [order, setOrder] = useState(() => steps.map((s) => s.id));
   const [synced, setSynced] = useState(steps);
   const [dragging, setDragging] = useState<number | null>(null);
@@ -84,7 +85,7 @@ export function StepList({ chainId, steps, models, supported }: { chainId: strin
                   <summary>Edit step</summary>
                   <div style={{ marginTop: 12 }}>
                     <ActionForm action={updateStep} submit="Save step">
-                      <StepFields chainId={chainId} models={models} initial={step} position={n} />
+                      <StepFields chainId={chainId} models={models} initial={step} position={n} sample={sample} />
                     </ActionForm>
                   </div>
                 </details>
