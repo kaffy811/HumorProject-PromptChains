@@ -281,3 +281,23 @@ details > summary { cursor: pointer; }
 mark.ph-ok { background: var(--good-bg); color: var(--good); padding: 0 2px; outline: 1px solid var(--good); }
 mark.ph-bad { background: var(--danger-bg); color: var(--danger); padding: 0 2px; outline: 1px solid var(--danger); text-decoration: wavy underline; }
 .preview .prompt { max-height: 200px; }
+
+/* Version history diff */
+.diff-block { border: 2px solid var(--edge); padding: 12px 14px; background: var(--field); display: grid; gap: 10px; }
+.diff-block h3 { margin: 0; font-size: 15px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.diff-field { display: grid; gap: 4px; min-width: 0; }
+.diff-field .label { font-weight: 800; font-size: 12px; }
+.diff-inline { margin: 0; overflow-wrap: anywhere; }
+.diff-inline del { color: var(--danger); background: var(--danger-bg); text-decoration: line-through; padding: 0 3px; }
+.diff-inline ins { color: var(--good); background: var(--good-bg); text-decoration: none; padding: 0 3px; }
+.prompt.diff span { display: block; }
+.diff-added { background: var(--good-bg); color: var(--good); }
+.diff-removed { background: var(--danger-bg); color: var(--danger); }
+.diff-same { color: var(--muted); }
+.inline-form { display: inline-flex; }
+.inline-form > div:last-child .btn { min-height: 32px; padding: 4px 10px; font-size: 12px; }
+tr[aria-current="true"] td { background: var(--hover); }
+/* Test this step */
+.try { border: 2px dashed var(--edge); padding: 10px 14px; background: var(--field); }
+.try > summary { cursor: pointer; list-style: none; display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.try > summary::-webkit-details-marker { display: none; }

@@ -21,7 +21,7 @@ export function sniffImage(bytes: Uint8Array) {
 }
 
 // Long side 1024 px JPEG: small enough for every provider, big enough to read.
-async function prepareImage(bytes: Uint8Array) {
+export async function prepareImage(bytes: Uint8Array) {
   try {
     return await sharp(bytes, { animated: false, limitInputPixels: 40_000_000 }).rotate()
       .resize({ width: 1024, height: 1024, fit: "inside", withoutEnlargement: true }).jpeg({ quality: 85 }).toBuffer();
