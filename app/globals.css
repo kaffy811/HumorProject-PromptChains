@@ -301,3 +301,12 @@ tr[aria-current="true"] td { background: var(--hover); }
 .try { border: 2px dashed var(--edge); padding: 10px 14px; background: var(--field); }
 .try > summary { cursor: pointer; list-style: none; display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
 .try > summary::-webkit-details-marker { display: none; }
+
+/* Chain settings header with History / Duplicate / Delete */
+.card-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+.card-head h2 { margin: 0 0 4px; }
+.popover { position: relative; }
+.popover > summary { list-style: none; }
+.popover > summary::-webkit-details-marker { display: none; }
+.popover-panel { position: absolute; right: 0; top: calc(100% + 8px); z-index: 20; width: min(380px, calc(100vw - 32px)); padding: 16px; }
+.model-note { margin: 0; padding: 9px 12px; border: 2px dashed var(--edge); background: var(--field); font-weight: 700; }

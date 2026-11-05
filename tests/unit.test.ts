@@ -24,7 +24,8 @@ console.log("PASS superadmin-only gate and safe redirects.");
 
 // Chain and step forms mirror the database checks.
 const form = (fields: Record<string, string>) => { const f = new FormData(); for (const [k, v] of Object.entries(fields)) f.set(k, v); return f; };
-assert.deepEqual(parseChain(form({ name: " Demo ", prompt_version: "demo-v2", description: "" })), { ok: true, value: { name: "Demo", prompt_version: "demo-v2", description: null } });
+assert.deepEqual(parseChain(form({ name: " Demo ", prompt_version: "demo-v2", description: "" })), { ok: true, value: { name: "Demo", prompt_version: "demo-v2", description: null, llm_model_id: null } });
+assert.equal(parseChain(form({ name: "D", prompt_version: "demo-v2", llm_model_id: "nope" })).ok, false, "model must be an id");
 assert.equal(parseChain(form({ name: "Demo", prompt_version: "Demo V2" })).ok, false);
 assert.equal(parseChain(form({ name: "", prompt_version: "demo-v2" })).ok, false);
 const model = "22222222-2222-4222-8222-222222222222";
@@ -194,4 +195,20 @@ import { copyNames, diffSnapshots, lineDiff, readSnapshot, snapshotSummary } fro
   const long = copyNames("x", "a".repeat(60), []);
   assert.ok(/^[a-z0-9][a-z0-9._-]{1,59}$/.test(long.prompt_version), "copy version stays valid");
   console.log("PASS version diff, summaries and copy names.");
+}
+
+// The chain's model: its own setting, else what most steps use; mixed when a step differs.
+import { chainModelOf } from "../lib/chain-rules";
+{
+  const st = (position: number, llm_model_id: string | null) => ({ position, llm_model_id });
+  assert.deepEqual(chainModelOf("g", [st(1, "g"), st(2, "g")]), { id: "g", mixed: false });
+  assert.deepEqual(chainModelOf(null, [st(1, "o"), st(2, "g"), st(3, "g")]), { id: "g", mixed: true }, "most common before the column exists");
+  assert.deepEqual(chainModelOf(null, [st(2, "g"), st(1, "o")]), { id: "o", mixed: true }, "ties go to the earliest step");
+  assert.deepEqual(chainModelOf("o", [st(1, "g")]), { id: "o", mixed: true }, "the chain's setting wins");
+  assert.deepEqual(chainModelOf(null, []), { id: null, mixed: false });
+  assert.deepEqual(chainModelOf("g", [st(1, null)]), { id: "g", mixed: true }, "a step with no model");
+  const d = diffSnapshots({ name: "a", prompt_version: "v", llm_model_id: "g", steps: [] }, { name: "a", prompt_version: "v", llm_model_id: "o", steps: [] }, (id) => id ?? "none");
+  assert.deepEqual(d.chain.map((c) => [c.field, c.before, c.after]), [["Chain model", "g", "o"]]);
+  assert.equal(diffSnapshots({ name: "a", steps: [] }, { name: "a", llm_model_id: "o", steps: [] }, (id) => id ?? "none").same, true, "older snapshots have no chain model to compare");
+  console.log("PASS chain model.");
 }

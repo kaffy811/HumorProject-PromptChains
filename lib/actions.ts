@@ -2,7 +2,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireSuperadmin } from "./auth";
-import { MAX_STEPS, parseChain, parseStep, UUID } from "./chain-rules";
+import { chainModelOf, MAX_STEPS, parseChain, parseStep, UUID } from "./chain-rules";
 import { saveVersion } from "./versions";
 import { serviceClient } from "./supabase/service";
 
@@ -19,25 +19,80 @@ export async function createChain(_: FormState, form: FormData): Promise<FormSta
   const me = await requireSuperadmin();
   const parsed = parseChain(form);
   if (!parsed.ok) return { error: parsed.error };
-  const { data, error } = await serviceClient(me.id).from("humor_prompt_chains").insert(parsed.value).select("id").single();
-  if (error) return { error: dbMessage(error) };
-  await saveVersion(serviceClient(me.id), data.id, "Created", me.id);
+  const db = serviceClient(me.id);
+  let result = await db.from("humor_prompt_chains").insert(parsed.value).select("id").single();
+  // Before migration 202611070001 the chain has no model column; steps still get it.
+  if (result.error && missingColumn(result.error)) {
+    const { name, prompt_version, description } = parsed.value;
+    result = await db.from("humor_prompt_chains").insert({ name, prompt_version, description }).select("id").single();
+  }
+  if (result.error) return { error: dbMessage(result.error) };
+  await saveVersion(db, result.data.id, "Created", me.id);
   refresh();
-  redirect(`/chains/${data.id}?created=1`);
+  redirect(`/chains/${result.data.id}?created=1`);
 }
 
+// Chain settings: details plus the chain's model, which every step then uses.
 export async function updateChain(_: FormState, form: FormData): Promise<FormState> {
   const me = await requireSuperadmin();
   const id = String(form.get("id") ?? "");
   if (!UUID.test(id)) return { error: "Unknown prompt chain." };
   const parsed = parseChain(form);
   if (!parsed.ok) return { error: parsed.error };
-  const { data, error } = await serviceClient(me.id).from("humor_prompt_chains").update(parsed.value).eq("id", id).select("id").maybeSingle();
+  const { llm_model_id: modelId, ...details } = parsed.value;
+  const db = serviceClient(me.id);
+  let switched: string | null = null;
+  if (modelId) {
+    const applied = await applyChainModel(db, id, modelId);
+    if ("error" in applied) return { error: applied.error };
+    switched = applied.switched;
+  }
+  const { data, error } = await db.from("humor_prompt_chains").update(details).eq("id", id).select("id").maybeSingle();
   if (error) return { error: dbMessage(error) };
   if (!data) return { error: "This prompt chain no longer exists." };
-  await saveVersion(serviceClient(me.id), id, "Edited chain details", me.id);
+  await saveVersion(db, id, switched ? `Every step on ${switched}` : "Edited chain settings", me.id);
   refresh(id);
-  return { ok: "Saved." };
+  return { ok: switched ? `Saved. Every step now uses ${switched}.` : "Saved." };
+}
+
+type Db = ReturnType<typeof serviceClient>;
+const missingColumn = (error: { code?: string; message?: string }) => error.code === "PGRST204" || error.code === "42703" || /llm_model_id/.test(error.message ?? "") && /column|schema cache/i.test(error.message ?? "");
+
+// Sets the chain's model and puts every step on it (one statement for the
+// steps, so a chain never runs half on one provider). Steps that see the
+// photo need a model that accepts images. switched = the model's name when
+// anything changed.
+async function applyChainModel(db: Db, chainId: string, modelId: string): Promise<{ error: string } | { switched: string | null }> {
+  const [{ data: model }, { data: steps, error: read }, { data: chain }] = await Promise.all([
+    db.from("humor_llm_models").select("display_name,is_active,supports_vision").eq("id", modelId).maybeSingle(),
+    db.from("humor_prompt_chain_steps").select("position,include_image,llm_model_id").eq("chain_id", chainId).order("position"),
+    db.from("humor_prompt_chains").select("*").eq("id", chainId).maybeSingle(),
+  ]);
+  if (read) return { error: read.message };
+  if (!chain) return { error: "This prompt chain no longer exists." };
+  if (!model) return { error: "That model no longer exists." };
+  const list = steps ?? [];
+  const same = list.every((s) => s.llm_model_id === modelId) && (chain as { llm_model_id?: string | null }).llm_model_id === modelId;
+  if (same) return { switched: null };
+  if (!model.is_active) return { error: `${model.display_name} is inactive. Activate it in Humor Admin → LLM models first.` };
+  const seeing = list.filter((s) => s.include_image).map((s) => s.position);
+  if (seeing.length && !model.supports_vision) return { error: `${model.display_name} does not accept images, but step ${seeing.join(", ")} sees the photo.` };
+  if (list.length) {
+    const { error } = await db.from("humor_prompt_chain_steps").update({ llm_model_id: modelId }).eq("chain_id", chainId);
+    if (error) return { error: error.message };
+  }
+  const { error } = await db.from("humor_prompt_chains").update({ llm_model_id: modelId }).eq("id", chainId);
+  if (error && !missingColumn(error)) return { error: error.message };
+  return { switched: model.display_name };
+}
+
+// New steps use the chain's model (its setting, else the one its steps use).
+async function chainModel(db: Db, chainId: string) {
+  const [{ data: chain }, { data: steps }] = await Promise.all([
+    db.from("humor_prompt_chains").select("*").eq("id", chainId).maybeSingle(),
+    db.from("humor_prompt_chain_steps").select("position,llm_model_id").eq("chain_id", chainId),
+  ]);
+  return chainModelOf((chain as { llm_model_id?: string | null } | null)?.llm_model_id ?? null, (steps ?? []) as { position: number; llm_model_id: string | null }[]).id;
 }
 
 // The chain members are using (Humor Admin → Model for members) cannot be deleted.
@@ -66,7 +121,7 @@ export async function createStep(_: FormState, form: FormData): Promise<FormStat
   if (read) return { error: read.message };
   if ((existing ?? []).length >= MAX_STEPS) return { error: `A chain can have at most ${MAX_STEPS} steps.` };
   const position = Math.max(0, ...(existing ?? []).map((s) => s.position as number)) + 1;
-  const { error } = await db.from("humor_prompt_chain_steps").insert({ ...parsed.value, chain_id: chainId, position });
+  const { error } = await db.from("humor_prompt_chain_steps").insert({ ...parsed.value, llm_model_id: await chainModel(db, chainId), chain_id: chainId, position });
   if (error) return { error: error.code === "23503" ? "This prompt chain no longer exists." : error.message };
   await saveVersion(db, chainId, `Added step ${position} (${parsed.value.name})`, me.id);
   refresh(chainId);
@@ -80,7 +135,9 @@ export async function updateStep(_: FormState, form: FormData): Promise<FormStat
   const parsed = parseStep(form);
   if (!parsed.ok) return { error: parsed.error };
   const db = serviceClient(me.id);
-  const { data, error } = await db.from("humor_prompt_chain_steps").update(parsed.value).eq("id", id).eq("chain_id", chainId).select("id,position").maybeSingle();
+  // The model is the chain's (Chain settings), never set per step.
+  const { name, include_image, output_kind, system_prompt, user_prompt, output_schema } = parsed.value;
+  const { data, error } = await db.from("humor_prompt_chain_steps").update({ name, include_image, output_kind, system_prompt, user_prompt, output_schema }).eq("id", id).eq("chain_id", chainId).select("id,position").maybeSingle();
   if (error) return { error: error.message };
   if (!data) return { error: "This step no longer exists." };
   await saveVersion(db, chainId, `Edited step ${data.position} (${parsed.value.name})`, me.id);
@@ -114,32 +171,6 @@ export async function reorderSteps(chainId: string, stepIds: string[]): Promise<
   await saveVersion(db, chainId, "Reordered steps", me.id);
   refresh(chainId);
   return { ok: "Order saved." };
-}
-
-// "Model for every step": one statement, so the chain never runs half on one
-// provider and half on another. Steps that see the photo need a vision model.
-export async function setChainModel(_: FormState, form: FormData): Promise<FormState> {
-  const me = await requireSuperadmin();
-  const chainId = String(form.get("chain_id") ?? ""), modelId = String(form.get("llm_model_id") ?? "");
-  if (!UUID.test(chainId)) return { error: "Unknown prompt chain." };
-  if (!UUID.test(modelId)) return { error: "Choose a model." };
-  const db = serviceClient(me.id);
-  const [{ data: model }, { data: steps, error: read }] = await Promise.all([
-    db.from("humor_llm_models").select("display_name,is_active,supports_vision,humor_llm_providers(slug,name)").eq("id", modelId).maybeSingle(),
-    db.from("humor_prompt_chain_steps").select("position,include_image,llm_model_id").eq("chain_id", chainId).order("position"),
-  ]);
-  if (read) return { error: read.message };
-  if (!model) return { error: "That model no longer exists." };
-  if (!steps?.length) return { error: "This chain has no steps yet." };
-  if (!model.is_active) return { error: `${model.display_name} is inactive. Activate it in Humor Admin → LLM models first.` };
-  const seeing = steps.filter((s) => s.include_image).map((s) => s.position);
-  if (seeing.length && !model.supports_vision) return { error: `${model.display_name} does not accept images, but step ${seeing.join(", ")} sees the photo.` };
-  if (steps.every((s) => s.llm_model_id === modelId)) return { ok: `Every step already uses ${model.display_name}.` };
-  const { error } = await db.from("humor_prompt_chain_steps").update({ llm_model_id: modelId }).eq("chain_id", chainId);
-  if (error) return { error: error.message };
-  await saveVersion(db, chainId, `Every step on ${model.display_name}`, me.id);
-  refresh(chainId);
-  return { ok: `All ${steps.length} steps now use ${model.display_name}.` };
 }
 
 // Copy a chain and its steps under a new prompt version (not given to members).

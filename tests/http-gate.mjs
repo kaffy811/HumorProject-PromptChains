@@ -121,7 +121,7 @@ try {
   assert.match(await (await get("/chains?new=1", { cookie: cookie(OWNER) })).text(), /<details class="card" id="new" open=""/, "?new=1 opens the create form");
   const editor = await (await get(`/chains/${CHAIN}`, { cookie: cookie(OWNER) })).text();
   for (const text of ["Move step 2 up", "Find the funny", "Returns captions", "Delete chain", 'class="flow"', "Flow: photo, step 1 Describe the photo"]) assert.match(editor, new RegExp(text), text);
-  for (const text of ["Model for every step", "Duplicate chain", "demo-three-step-v1-copy", "Test this step", "History"]) assert.match(editor, new RegExp(text), text);
+  for (const text of ["Chain settings", "Save settings", "Duplicate", "demo-three-step-v1-copy", "Test this step", "History", "set for the whole chain"]) assert.match(editor, new RegExp(text), text);
   const history = await (await get(`/chains/${CHAIN}/history`, { cookie: cookie(OWNER) })).text();
   for (const text of ["Version 1 → 2", "Edited step 2", "Write a joke.", "Write a short observational comedy bit.", "Hana Lee", "migration", "vs current", "Restore"]) assert.match(history, new RegExp(text), `history: ${text}`);
   const run = await (await get(`/chains/${CHAIN}/run`, { cookie: cookie(OWNER) })).text();
@@ -184,10 +184,13 @@ try {
         await page.screenshot({ path: `${process.env.SCREENSHOTS}/light-try.png`, fullPage: true });
         // Model for every step and duplicate go through their actions.
         await page.goto(`${ORIGIN}/chains/${CHAIN}`);
-        await page.locator("#every-model").selectOption({ label: "GPT-6 Astra · OpenAI" });
-        await page.getByRole("button", { name: "Use for every step" }).click();
-        await page.getByText(/now use GPT-6 Astra|already uses/).waitFor({ timeout: 10000 });
-        await page.getByRole("button", { name: "Duplicate" }).click();
+        assert.equal(await page.locator("select[name=llm_model_id]").count(), 1, "the model is chosen once, in Chain settings");
+        await page.locator(`#model-${CHAIN}`).selectOption({ label: "GPT-6 Astra · OpenAI" });
+        await page.getByRole("button", { name: "Save settings" }).click();
+        await page.getByText("Saved. Every step now uses GPT-6 Astra.").waitFor({ timeout: 10000 });
+        await page.locator("summary", { hasText: "Duplicate" }).click();
+        await page.screenshot({ path: `${process.env.SCREENSHOTS}/light-settings.png` });
+        await page.getByRole("button", { name: "Duplicate", exact: true }).click();
         await page.waitForURL(/\?copied=1/, { timeout: 10000 });
         await page.getByText("Copy created with all its steps").waitFor();
         await page.goto(`${ORIGIN}/chains/${CHAIN}/history`);

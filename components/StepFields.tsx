@@ -13,7 +13,7 @@ export type StepInitial = {
 // Fields of one step (add and edit forms), with a live preview of the user
 // prompt: placeholders highlighted (red when this step cannot use them) and
 // filled with sample data, plus a rough token count.
-export function StepFields({ chainId, models, initial, position, sample = null }: { chainId: string; models: ModelOption[]; initial?: StepInitial; position: number; sample?: RunSample | null }) {
+export function StepFields({ chainId, model, initial, position, sample = null }: { chainId: string; model: ModelOption | null; initial?: StepInitial; position: number; sample?: RunSample | null }) {
   const [kind, setKind] = useState(initial?.output_kind ?? "text");
   const [system, setSystem] = useState(initial?.system_prompt ?? "");
   const [user, setUser] = useState(initial?.user_prompt ?? "");
@@ -36,12 +36,10 @@ export function StepFields({ chainId, models, initial, position, sample = null }
         <input id={`sname-${key}`} name="name" className="input" required maxLength={80} defaultValue={initial?.name} placeholder="e.g. Describe the photo" />
       </div>
       <div className="field">
-        <label htmlFor={`model-${key}`}>Model</label>
-        <select id={`model-${key}`} name="llm_model_id" className="select" defaultValue={initial?.llm_model_id ?? ""}>
-          <option value="">Choose a model…</option>
-          {models.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
-        </select>
-        <span className="hint">Models and providers are managed in Humor Admin → LLM models &amp; providers.</span>
+        <span className="label">Model</span>
+        {/* Sent only for "Test this step"; saving a step never changes its model. */}
+        <input type="hidden" name="llm_model_id" value={model?.id ?? ""} />
+        <p className="model-note">{model ? model.label : "Not chosen yet"} <span className="hint">· set for the whole chain in <a href="#settings">Chain settings</a></span></p>
       </div>
       <div className="field">
         <span className="label">Input</span>

@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { requireSuperadmin } from "@/lib/auth";
 import { createChain } from "@/lib/actions";
 import { chainProblems } from "@/lib/chain-rules";
-import { isMissingTable, listChains } from "@/lib/data";
+import { isMissingTable, listChains, modelOptions } from "@/lib/data";
 import { SUPPORTED_PROVIDERS } from "@/lib/llm";
 import { ActionForm } from "@/components/ActionForm";
 import { ChainFields } from "@/components/ChainFields";
@@ -13,7 +13,7 @@ export const metadata: Metadata = { title: "Prompt chains" };
 export default async function Chains({ searchParams }: { searchParams: Promise<{ deleted?: string; new?: string }> }) {
   await requireSuperadmin();
   const { deleted, new: opening } = await searchParams;
-  const { chains, error, runsReady } = await listChains();
+  const [{ chains, error, runsReady }, models] = await Promise.all([listChains(), modelOptions()]);
   if (error && !isMissingTable(error)) throw new Error(error.message);
   return (
     <div className="stack">
@@ -29,7 +29,7 @@ export default async function Chains({ searchParams }: { searchParams: Promise<{
       <details className="card" id="new" open={!chains.length || !!opening}>
         <summary style={{ fontWeight: 800 }}>+ New prompt chain</summary>
         <div style={{ marginTop: 14 }}>
-          <ActionForm action={createChain} submit="Create chain" pendingLabel="Creating…"><ChainFields /></ActionForm>
+          <ActionForm action={createChain} submit="Create chain" pendingLabel="Creating…"><ChainFields models={models} /></ActionForm>
         </div>
       </details>
       <div className="chain-grid">
