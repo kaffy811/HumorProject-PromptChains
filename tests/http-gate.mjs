@@ -184,6 +184,12 @@ try {
         // Ctrl/⌘+S saves; inputs insert at the cursor; ⤢ opens the big editor.
         await panel.getByRole("button", { name: "{direction}" }).click();
         assert.match(await panel.getByRole("textbox", { name: "User prompt" }).inputValue(), /\{direction\}/);
+        // Full page: settings beside big prompt boxes; Esc returns to the canvas.
+        await panel.getByRole("button", { name: /Full page/ }).click();
+        await page.locator(".chain-panel.is-full").waitFor();
+        await page.screenshot({ path: `${process.env.SCREENSHOTS}/light-fullpage.png` });
+        await page.keyboard.press("Escape");
+        await page.locator(".chain-panel:not(.is-full)").waitFor();
         await panel.getByRole("button", { name: "Expand the system prompt" }).click();
         await page.getByRole("dialog", { name: "System prompt" }).waitFor();
         await page.getByRole("button", { name: "Done" }).click();
@@ -212,6 +218,11 @@ try {
         await page.goto(`${ORIGIN}/chains/${CHAIN}`);
         await page.getByRole("button", { name: "Insert a step before step 2" }).click();
         await panel.getByRole("heading", { name: "New step 2" }).waitFor();
+        // Empty prompt boxes explain {…} inputs with the ones this position can use.
+        const hintText = await panel.getByRole("textbox", { name: "User prompt" }).getAttribute("placeholder");
+        assert.match(hintText, /curly braces/); assert.match(hintText, /\{previous\}/); assert.match(hintText, /\{direction\}/);
+        assert.match(await panel.getByRole("textbox", { name: "System prompt" }).getAttribute("placeholder"), /Example/);
+        await page.screenshot({ path: `${process.env.SCREENSHOTS}/light-new-step.png` });
         await panel.getByLabel("Step name").fill("Pick the best angle");
         await panel.getByRole("textbox", { name: "System prompt" }).fill("You are a comedy editor.");
         await panel.getByRole("textbox", { name: "User prompt" }).fill("From {previous}, pick one angle. {direction}");

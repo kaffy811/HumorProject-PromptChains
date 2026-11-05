@@ -42,6 +42,8 @@ function Canvas({ chainId, steps, model, supported, sample }: { chainId: string;
   const [saving, startSaving] = useTransition();
   const dirty = useRef(false);
   const [width, setWidth] = useState(440);
+  // The step editor opened as a full page.
+  const [full, setFull] = useState(false);
   const flow = useReactFlow();
   // New steps from the server (add, delete, edit, reorder) replace the local order.
   if (synced !== steps) { setSynced(steps); setOrder(steps.map((s) => s.id)); }
@@ -62,7 +64,7 @@ function Canvas({ chainId, steps, model, supported, sample }: { chainId: string;
   }, [flow]);
   const open = useCallback((id: string) => { if (id === selected || !leave()) return; dirty.current = false; restoreWidth(); setDraftAt(null); setSelected(id); focusNode(id); }, [selected, leave, focusNode]);
   const insert = useCallback((at: number) => { if (!leave()) return; dirty.current = false; restoreWidth(); setSelected(null); setDraftAt(at); }, [leave]);
-  const close = useCallback(() => { if (!leave()) return; dirty.current = false; setSelected(null); setDraftAt(null); }, [leave]);
+  const close = useCallback(() => { if (!leave()) return; dirty.current = false; setSelected(null); setDraftAt(null); setFull(false); }, [leave]);
   const test = useCallback((id: string) => {
     open(id);
     setTimeout(() => {
@@ -84,6 +86,15 @@ function Canvas({ chainId, steps, model, supported, sample }: { chainId: string;
   // The open panel reports its own unsaved state (onDirty); saving only changes the selection.
   const onSaved = useCallback((id: string) => { setDraftAt(null); setSelected(id); }, []);
   const onDirty = useCallback((value: boolean) => { dirty.current = value; }, []);
+  // Full page: Esc goes back to the canvas (the expanded prompt editor handles its own Esc), and the page behind does not scroll.
+  useEffect(() => {
+    if (!full) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape" && !document.querySelector(".prompt-modal")) setFull(false); };
+    const overflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", onKey);
+    return () => { window.removeEventListener("keydown", onKey); document.body.style.overflow = overflow; };
+  }, [full]);
   // Leaving the page with unsaved edits asks first.
   useEffect(() => {
     const warn = (e: BeforeUnloadEvent) => { if (dirty.current) e.preventDefault(); };
@@ -171,12 +182,12 @@ function Canvas({ chainId, steps, model, supported, sample }: { chainId: string;
           </ReactFlow>
         </div>
         {panelOpen && (
-          <aside className="chain-panel" aria-label={panelStep ? `Edit step ${panelPosition}` : `New step ${panelPosition}`}>
+          <aside className={`chain-panel${full ? " is-full" : ""}`} aria-label={panelStep ? `Edit step ${panelPosition}` : `New step ${panelPosition}`}>
             <div className="panel-resize" role="separator" aria-orientation="vertical" aria-label="Resize the step editor" onPointerDown={resize} />
             <StepPanel key={panelStep ? `${panelStep.id}:${panelPosition}` : `new:${draftAt}`} chainId={chainId} step={panelStep} position={panelPosition}
               insertAt={panelStep ? null : draftAt} model={model} names={ordered.map((s) => s.name)}
               problems={problems.filter((p) => panelStep && p.position === panelPosition)} sample={sample}
-              onClose={close} onSaved={onSaved} onDirty={onDirty} />
+              onClose={close} onSaved={onSaved} onDirty={onDirty} full={full} onToggleFull={() => setFull((f) => !f)} />
           </aside>
         )}
       </div>

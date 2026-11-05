@@ -397,3 +397,19 @@ tr[aria-current="true"] td { background: var(--hover); }
   .canvas { height: 480px; }
   .canvas-legend { display: none; }
 }
+
+/* Step editor columns: one column beside the canvas (sections keep their order),
+   settings | prompts as a full page. */
+.panel-cols, .col-side, .col-main { display: contents; }
+.chain-panel.is-full { position: fixed; inset: 0; z-index: 45; height: auto; border-left: 0; }
+.chain-panel.is-full .panel-resize { display: none; }
+.chain-panel.is-full .panel-head, .chain-panel.is-full .panel-foot { padding-left: max(14px, calc((100vw - 1320px) / 2)); padding-right: max(14px, calc((100vw - 1320px) / 2)); }
+.chain-panel.is-full .panel-body { padding: 16px max(14px, calc((100vw - 1320px) / 2)); }
+.chain-panel.is-full .panel-cols { display: grid; grid-template-columns: minmax(300px, 400px) minmax(0, 1fr); gap: 16px; align-items: start; }
+.chain-panel.is-full .col-side, .chain-panel.is-full .col-main { display: grid; gap: 12px; align-content: start; min-width: 0; }
+.chain-panel.is-full .col-main .textarea { min-height: 32vh; font: 13.5px/1.55 var(--font-label); }
+.chain-panel.is-full .col-main .preview .grid-2 { grid-template-columns: 1fr 1fr; }
+@media (max-width: 900px) {
+  .chain-panel.is-full .panel-cols { grid-template-columns: 1fr; }
+}
+.textarea::placeholder { white-space: pre-wrap; }
