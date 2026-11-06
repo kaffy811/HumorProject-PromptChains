@@ -4,7 +4,7 @@ import { placeholdersIn } from "@/lib/chain-rules";
 import type { TryResult } from "@/lib/try-step";
 import { seconds } from "@/lib/format";
 
-export type RunSample = { runId: string; direction: string; createdAt: string; outputs: (string | null)[] };
+export type RunSample = { runId: string; direction: string; createdAt: string; outputs: (string | null)[]; statusByStep?: Record<string, string> };
 
 // "Test this step": runs this one step exactly as the form shows it (saved or
 // not) on a photo and hand-written earlier outputs. Nothing is saved.

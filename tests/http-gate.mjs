@@ -33,7 +33,7 @@ const T = {
   humor_llm_models: [{ id: M1, ...model }, { id: "11111111-1111-4111-8111-000000000005", model_id: "gpt-6-astra", display_name: "GPT-6 Astra", is_active: true, supports_vision: true, humor_llm_providers: { slug: "openai", name: "OpenAI" } }],
   humor_chain_runs: [{ id: RUN, chain_id: CHAIN, chain_name: "Describe → funny → five captions", prompt_version: "demo-three-step-v1", image_path: `${RUN}.jpg`, status: "completed", direction: "midterms week", step_count: 3, created_at: now, completed_at: now, final_output: null,
     captions: [{ caption: "Butler at 2am: where dreams go to study.", style: "deadpan" }, { caption: "Peak academic weapon, powered by vending machine coffee.", style: "roast" }, { caption: "Booked and very busy.", style: "pun" }, { caption: "Hi tired, I'm dad.", style: "dad joke" }, { caption: "The library chair has filed for custody.", style: "absurd" }] }],
-  humor_chain_run_steps: steps.map((s, i) => ({ run_id: RUN, position: s.position, name: s.name, provider: "google", model: "gemini-3.8-flash", include_image: s.include_image, output_kind: s.output_kind, status: "completed", system_prompt: s.system_prompt, user_prompt_template: s.user_prompt, user_prompt: s.user_prompt.replace("{direction}", "midterms week").replace("{previous}", "(previous output)"), usage: { input: 900 - i * 300, output: 120, total: 1020 - i * 300 }, latency_ms: 4200 - i * 1500,
+  humor_chain_run_steps: steps.map((s, i) => ({ run_id: RUN, position: s.position, step_id: s.id, name: s.name, provider: "google", model: "gemini-3.8-flash", include_image: s.include_image, output_kind: s.output_kind, status: "completed", system_prompt: s.system_prompt, user_prompt_template: s.user_prompt, user_prompt: s.user_prompt.replace("{direction}", "midterms week").replace("{previous}", "(previous output)"), usage: { input: 900 - i * 300, output: 120, total: 1020 - i * 300 }, latency_ms: 4200 - i * 1500,
     output: ["A student is asleep face-down on a desk in Butler Library, surrounded by open textbooks and an empty coffee cup.", "Nothing says midterms like Butler at 2am: the coffee is empty, the textbooks are open, and the only thing studying is the desk.", '{"captions":[{"caption":"Butler at 2am: where dreams go to study.","style":"deadpan"}]}'][i] })),
   humor_prompt_chain_steps: steps.map((s) => ({ ...s, chain_id: CHAIN })),
   humor_prompt_chain_versions: [
@@ -182,14 +182,28 @@ try {
         await panel.getByText("Unsaved", { exact: true }).waitFor();
         await page.screenshot({ path: `${process.env.SCREENSHOTS}/light-canvas-panel.png` });
         // Ctrl/⌘+S saves; inputs insert at the cursor; ⤢ opens the big editor.
-        await panel.getByRole("button", { name: "{direction}" }).click();
+        await panel.getByRole("button", { name: "{direction}" }).first().click();
         assert.match(await panel.getByRole("textbox", { name: "User prompt" }).inputValue(), /\{direction\}/);
-        // Full page: settings beside big prompt boxes; Esc returns to the canvas.
-        await panel.getByRole("button", { name: /Full page/ }).click();
-        await page.locator(".chain-panel.is-full").waitFor();
-        await page.screenshot({ path: `${process.env.SCREENSHOTS}/light-fullpage.png` });
+        // Typing "{" opens the variable picker; picking replaces that "{".
+        const userBox = panel.getByRole("textbox", { name: "User prompt" });
+        await userBox.fill("Angles: ");
+        await userBox.press("End");
+        await userBox.press("{");
+        const picker = panel.getByRole("dialog", { name: "Insert a variable" });
+        await picker.waitFor();
+        assert.match(await picker.textContent(), /Run inputs.*Step 1 · Describe the photo/s, "grouped by where variables come from");
+        assert.match(await picker.textContent(), /Image/); assert.match(await picker.textContent(), /String/);
+        await page.screenshot({ path: `${process.env.SCREENSHOTS}/light-picker.png` });
+        await picker.getByRole("button", { name: "{step1}" }).click();
+        assert.equal(await userBox.inputValue(), "Angles: {step1}", "the typed { is replaced by the variable");
+        assert.equal(await panel.getByRole("button", { name: /Full page/ }).count(), 0, "no full-page button in the editor");
+        // Full screen: the whole Steps area (canvas + editor); Esc returns.
+        await page.getByRole("button", { name: "⤢ Full screen" }).click();
+        await page.locator(".canvas-wrap.is-fullscreen .chain-panel").waitFor();
+        await page.waitForTimeout(400);
+        await page.screenshot({ path: `${process.env.SCREENSHOTS}/light-fullscreen.png` });
         await page.keyboard.press("Escape");
-        await page.locator(".chain-panel:not(.is-full)").waitFor();
+        await page.locator(".canvas-wrap:not(.is-fullscreen)").waitFor();
         await panel.getByRole("button", { name: "Expand the system prompt" }).click();
         await page.getByRole("dialog", { name: "System prompt" }).waitFor();
         await page.getByRole("button", { name: "Done" }).click();
@@ -197,7 +211,7 @@ try {
         await page.keyboard.press("Control+s");
         await panel.getByText("Step saved.").waitFor({ timeout: 10000 });
         const patch = writes.find((w) => w.method === "PATCH" && w.path.endsWith("humor_prompt_chain_steps"));
-        assert.ok(patch && /\{direction\}/.test(patch.body.user_prompt) && !("llm_model_id" in patch.body), "saved prompt, never the model");
+        assert.ok(patch && patch.body.user_prompt === "Angles: {step1}" && !("llm_model_id" in patch.body), "saved prompt, never the model");
         // Switching steps with unsaved changes asks first.
         await panel.getByRole("textbox", { name: "User prompt" }).fill("Changed again {previous}");
         await page.getByRole("button", { name: "Fit" }).click();
@@ -251,6 +265,18 @@ try {
         page.once("dialog", (d) => d.accept());
         await page.getByRole("button", { name: "Restore" }).click();
         await page.getByText("Restored version 1; saved as version 3.").waitFor({ timeout: 10000 });
+        // Only neighbours are connected (no {step1} arcs), and nodes show status and types.
+        await page.goto(`${ORIGIN}/chains/${CHAIN}`);
+        assert.equal(await page.locator(".react-flow__edge").count(), 4, "photo→1→2→3→captions");
+        assert.equal(await page.locator(".cnode-status", { hasText: "Last run ✓" }).count(), 3);
+        // Drag from step 3's output point to step 1's input point: step 1 runs right after step 3.
+        await page.getByRole("button", { name: "Fit" }).click();
+        await page.waitForTimeout(300);
+        writes.length = 0;
+        await page.locator(".react-flow__node-step").nth(2).locator(".react-flow__handle-right").dragTo(page.locator(".react-flow__node-step").nth(0).locator(".react-flow__handle-left"));
+        await page.getByText("Order saved.").waitFor({ timeout: 10000 });
+        const dragged = writes.find((w) => w.path.endsWith("humor_reorder_prompt_chain_steps"));
+        assert.deepEqual(dragged?.body.step_ids, [steps[1].id, steps[2].id, steps[0].id], "dragging output → input reorders");
         // Reorder from a step's ⋯ menu.
         await page.goto(`${ORIGIN}/chains/${CHAIN}`);
         await page.getByRole("button", { name: "Step 1 menu" }).click();

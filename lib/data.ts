@@ -120,9 +120,12 @@ export async function latestRunSample(chainId: string) {
   const db = serviceClient();
   const { data: run } = await db.from("humor_chain_runs").select("id,direction,created_at").eq("chain_id", chainId).order("created_at", { ascending: false }).limit(1).maybeSingle();
   if (!run) return null;
-  const { data: steps } = await db.from("humor_chain_run_steps").select("position,output,status").eq("run_id", run.id).order("position");
+  const { data: steps } = await db.from("humor_chain_run_steps").select("position,output,status,step_id").eq("run_id", run.id).order("position");
+  const rows = (steps ?? []) as { position: number; output: string | null; status: string; step_id: string | null }[];
   return {
     runId: run.id as string, direction: (run.direction as string | null) ?? "", createdAt: run.created_at as string,
-    outputs: ((steps ?? []) as { position: number; output: string | null; status: string }[]).reduce<(string | null)[]>((list, s) => { list[s.position - 1] = s.status === "completed" ? s.output : null; return list; }, []),
+    outputs: rows.reduce<(string | null)[]>((list, s) => { list[s.position - 1] = s.status === "completed" ? s.output : null; return list; }, []),
+    // How each step did in that run, by step id (positions may have changed since).
+    statusByStep: Object.fromEntries(rows.filter((s) => s.step_id).map((s) => [s.step_id!, s.status])) as Record<string, string>,
   };
 }

@@ -4,10 +4,10 @@ import Link from "next/link";
 import { createContext, memo, useCallback, useContext, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import {
   Background, BackgroundVariant, BaseEdge, EdgeLabelRenderer, Handle, MiniMap, Panel, Position, ReactFlow, ReactFlowProvider,
-  getStraightPath, useReactFlow, useViewport, type Edge, type EdgeProps, type Node, type NodeProps,
+  getStraightPath, useReactFlow, useViewport, type Connection, type Edge, type EdgeProps, type Node, type NodeProps,
 } from "@xyflow/react";
 import { reorderSteps } from "@/lib/actions";
-import { canvasLayout, stepInputs, END_W, NODE_W, type CanvasEdge } from "@/lib/canvas";
+import { canvasLayout, orderAfterConnect, stepInputs, END_W, NODE_W, type CanvasEdge } from "@/lib/canvas";
 import { chainProblems, moveStep, type Problem } from "@/lib/chain-rules";
 import type { ModelOption } from "@/lib/data";
 import { providerLabel } from "@/components/ChainCard";
@@ -15,24 +15,28 @@ import { StepPanel, type PanelStep } from "@/components/StepPanel";
 import type { RunSample } from "@/components/StepTry";
 
 export type CanvasStepRow = PanelStep & { modelLabel: string | null; model: { model_id: string; is_active: boolean; supports_vision: boolean; provider: string | null } | null };
-type Actions = { open: (id: string) => void; test: (id: string) => void; move: (from: number, to: number) => void; insert: (at: number) => void; busy: boolean; count: number };
+type Actions = { open: (id: string) => void; test: (id: string) => void; move: (from: number, to: number) => void; insert: (at: number) => void; busy: boolean; count: number;
+  fullscreen: boolean; toggleFullscreen: () => void };
 const ActionsContext = createContext<Actions | null>(null);
 const useActions = () => useContext(ActionsContext)!;
 
-type StepData = { step: CanvasStepRow; index: number; problems: Problem[]; selected: boolean };
+type StepData = { step: CanvasStepRow; index: number; problems: Problem[]; selected: boolean; before: { output_kind: string }[]; lastRun: string | null };
 type StepNodeType = Node<StepData, "step">;
 type EndData = { label: string; detail: string };
 type EdgeData = CanvasEdge;
 const PANEL_KEY = "chain-panel-width";
 
 // Coze-style editor: zoomable canvas (photo → steps → captions) with a side
-// panel for the selected step. Steps keep their run order, so nodes are laid
-// out automatically; order changes via each node's menu (← →).
-export function ChainCanvas(props: { chainId: string; steps: CanvasStepRow[]; model: ModelOption | null; supported: string[]; sample: RunSample | null }) {
+// panel for the selected step. Steps run in a line, so nodes are laid out
+// automatically and only neighbours are connected. Dragging from a node's
+// output point to another node's input point makes the second run right after
+// the first (a reorder, saved as a version); ⋯ → move left / right does too.
+type CanvasProps = { chainId: string; chainName: string; steps: CanvasStepRow[]; model: ModelOption | null; supported: string[]; sample: RunSample | null };
+export function ChainCanvas(props: CanvasProps) {
   return <ReactFlowProvider><Canvas {...props} /></ReactFlowProvider>;
 }
 
-function Canvas({ chainId, steps, model, supported, sample }: { chainId: string; steps: CanvasStepRow[]; model: ModelOption | null; supported: string[]; sample: RunSample | null }) {
+function Canvas({ chainId, chainName, steps, model, supported, sample }: CanvasProps) {
   const [order, setOrder] = useState(() => steps.map((s) => s.id));
   const [synced, setSynced] = useState(steps);
   // Selected step id, or a new step to insert at a position.
@@ -42,7 +46,7 @@ function Canvas({ chainId, steps, model, supported, sample }: { chainId: string;
   const [saving, startSaving] = useTransition();
   const dirty = useRef(false);
   const [width, setWidth] = useState(440);
-  // The step editor opened as a full page.
+  // The whole Steps area (canvas and editor) as a full screen.
   const [full, setFull] = useState(false);
   const flow = useReactFlow();
   // New steps from the server (add, delete, edit, reorder) replace the local order.
@@ -64,7 +68,7 @@ function Canvas({ chainId, steps, model, supported, sample }: { chainId: string;
   }, [flow]);
   const open = useCallback((id: string) => { if (id === selected || !leave()) return; dirty.current = false; restoreWidth(); setDraftAt(null); setSelected(id); focusNode(id); }, [selected, leave, focusNode]);
   const insert = useCallback((at: number) => { if (!leave()) return; dirty.current = false; restoreWidth(); setSelected(null); setDraftAt(at); }, [leave]);
-  const close = useCallback(() => { if (!leave()) return; dirty.current = false; setSelected(null); setDraftAt(null); setFull(false); }, [leave]);
+  const close = useCallback(() => { if (!leave()) return; dirty.current = false; setSelected(null); setDraftAt(null); }, [leave]);
   const test = useCallback((id: string) => {
     open(id);
     setTimeout(() => {
@@ -72,9 +76,8 @@ function Canvas({ chainId, steps, model, supported, sample }: { chainId: string;
       if (details) { details.open = true; details.scrollIntoView({ behavior: "smooth", block: "start" }); }
     }, 60);
   }, [open]);
-  const move = useCallback((from: number, to: number) => {
-    const next = moveStep(order, from, to);
-    if (next === order) return;
+  // New order shows at once, is saved atomically (one version) and rolls back on failure.
+  const saveOrder = useCallback((next: string[]) => {
     const previous = order;
     setOrder(next); setMessage(null);
     startSaving(async () => {
@@ -83,10 +86,12 @@ function Canvas({ chainId, steps, model, supported, sample }: { chainId: string;
       else setMessage({ kind: "good", text: "Order saved." });
     });
   }, [order, chainId]);
+  const move = useCallback((from: number, to: number) => { const next = moveStep(order, from, to); if (next !== order) saveOrder(next); }, [order, saveOrder]);
+  const connect = useCallback((c: Connection) => { const next = orderAfterConnect(order, c.source, c.target); if (next) saveOrder(next); }, [order, saveOrder]);
   // The open panel reports its own unsaved state (onDirty); saving only changes the selection.
   const onSaved = useCallback((id: string) => { setDraftAt(null); setSelected(id); }, []);
   const onDirty = useCallback((value: boolean) => { dirty.current = value; }, []);
-  // Full page: Esc goes back to the canvas (the expanded prompt editor handles its own Esc), and the page behind does not scroll.
+  // Full screen: Esc goes back (the expanded prompt editor handles its own Esc), and the page behind does not scroll.
   useEffect(() => {
     if (!full) return;
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape" && !document.querySelector(".prompt-modal")) setFull(false); };
@@ -104,14 +109,15 @@ function Canvas({ chainId, steps, model, supported, sample }: { chainId: string;
 
   const nodes: Node[] = layout.nodes.map((n) => n.type === "step"
     ? { id: n.id, type: "step", position: { x: n.x, y: 0 }, draggable: false, selectable: true, width: NODE_W,
-        data: { step: ordered[n.index!], index: n.index!, problems: problems.filter((p) => p.position === n.index! + 1), selected: selected === n.id } satisfies StepData }
-    : { id: n.id, type: n.type, position: { x: n.x, y: 22 }, draggable: false, selectable: false, width: END_W,
+        data: { step: ordered[n.index!], index: n.index!, problems: problems.filter((p) => p.position === n.index! + 1), selected: selected === n.id,
+          before: ordered.slice(0, n.index!), lastRun: sample?.statusByStep?.[n.id] ?? null } satisfies StepData }
+    // End nodes are 64px tall: their centre lines up with the steps' anchors (44px below a 6px top border).
+    : { id: n.id, type: n.type, position: { x: n.x, y: 18 }, draggable: false, selectable: false, width: END_W,
         data: n.type === "photo"
           ? { label: "📷 Photo", detail: `${ordered.filter((s) => s.include_image).length} step(s) see it` }
           : { label: "✦ Captions", detail: ordered.at(-1)?.output_kind === "captions" ? "from the last step" : "last step returns text" } satisfies EndData });
   const edges: Edge[] = layout.edges.map((e) => ({
-    id: e.id, source: e.source, target: e.target, type: e.adjacent ? "flow" : "arc", data: e,
-    sourceHandle: e.adjacent ? "r" : e.side === "bottom" ? "bs" : "ts", targetHandle: e.adjacent ? "l" : e.side === "bottom" ? "bt" : "tt",
+    id: e.id, source: e.source, target: e.target, type: "flow", data: e, sourceHandle: "r", targetHandle: "l",
   }));
   // First view: the whole chain when it fits at a readable size, else its start (photo → step 1).
   const box = useRef<HTMLDivElement>(null);
@@ -127,7 +133,9 @@ function Canvas({ chainId, steps, model, supported, sample }: { chainId: string;
   const panelOpen = !!panelStep || draftAt !== null;
   const panelPosition = panelStep ? order.indexOf(panelStep.id) + 1 : draftAt ?? 0;
   const firstProblem = problems.find((p) => p.position !== null);
-  const actions: Actions = { open, test, move, insert, busy: saving, count: ordered.length };
+  const toggleFullscreen = useCallback(() => { setFull((f) => !f); setTimeout(() => flow.fitView({ padding: 0.1, minZoom: 0.7, maxZoom: 1, duration: 200 }), 80); }, [flow]);
+  const actions: Actions = { open, test, move, insert, busy: saving, count: ordered.length, fullscreen: full, toggleFullscreen };
+  const blockingCount = problems.filter((p) => p.blocking).length;
 
   const resize = (e: React.PointerEvent) => {
     const startX = e.clientX, startW = width;
@@ -146,28 +154,39 @@ function Canvas({ chainId, steps, model, supported, sample }: { chainId: string;
         {ordered.map((s, i) => <li key={s.id}>{`Step ${i + 1}: ${s.name}, ${s.include_image ? "sees the photo, " : ""}returns ${s.output_kind}${problems.some((p) => p.position === i + 1 && p.blocking) ? ", has a problem" : ""}`}</li>)}
       </ol>
       <CanvasMarkers />
-      <div className={`canvas-wrap${panelOpen ? " with-panel" : ""}`} style={{ "--panel-w": `${width}px` } as React.CSSProperties}>
+      <div className={`canvas-wrap${panelOpen ? " with-panel" : ""}${full ? " is-fullscreen" : ""}`} style={{ "--panel-w": `${width}px` } as React.CSSProperties}
+        role={full ? "dialog" : undefined} aria-modal={full || undefined} aria-label={full ? `Steps of ${chainName}` : undefined}>
+        {full && (
+          <header className="fs-bar">
+            <b>{chainName}</b>
+            <span className="hint">{ordered.length} step{ordered.length === 1 ? "" : "s"} · {model ? model.label : "no model yet"}</span>
+            {blockingCount ? <span className="badge badge-bad">{blockingCount} problem{blockingCount === 1 ? "" : "s"}</span> : ordered.length > 0 && <span className="badge badge-good">Ready to run</span>}
+            <button type="button" className="btn btn-sm" style={{ marginLeft: "auto" }} onClick={toggleFullscreen} title="Esc">⤡ Exit full screen</button>
+          </header>
+        )}
         <div className="canvas" ref={box} onKeyDown={(e) => {
           // Enter on a focused step opens it, like a click.
           const id = (document.activeElement as HTMLElement | null)?.dataset?.id;
           if (e.key === "Enter" && id && byId.has(id)) open(id);
         }}>
           <ReactFlow nodes={nodes} edges={edges} nodeTypes={NODE_TYPES} edgeTypes={EDGE_TYPES}
-            nodesDraggable={false} nodesConnectable={false} edgesFocusable={false} elementsSelectable
+            nodesDraggable={false} nodesConnectable edgesFocusable={false} elementsSelectable
+            onConnect={connect} isValidConnection={(c) => !!orderAfterConnect(order, c.source, c.target)}
+            connectionLineStyle={{ stroke: "var(--tomato)", strokeWidth: 2.5, strokeDasharray: "6 4" }}
             onNodeClick={(_, node) => { if (byId.has(node.id)) open(node.id); }}
             onInit={startView} minZoom={0.25} maxZoom={1.6}
             proOptions={{ hideAttribution: true }} aria-label="Prompt chain canvas">
             <Background variant={BackgroundVariant.Dots} gap={18} size={1.4} />
             <MiniMap pannable zoomable className="canvas-minimap" nodeBorderRadius={0} ariaLabel="Overview of the chain" style={{ width: 150, height: 90 }} />
             <Panel position="top-left">
-              <div className="canvas-status" aria-live="polite">
+              <div className={`canvas-status${full ? " in-fullscreen" : ""}`} aria-live="polite">
                 {saving ? <span className="badge">Saving order…</span>
                   : message ? <span className={`badge badge-${message.kind}`}>{message.text}</span> : null}
-                {problems.some((p) => p.blocking)
+                {blockingCount
                   ? <button type="button" className="badge badge-bad as-button" onClick={() => { if (firstProblem) open(ordered[firstProblem.position! - 1].id); }}>
-                      {problems.filter((p) => p.blocking).length} problem{problems.filter((p) => p.blocking).length === 1 ? "" : "s"}{firstProblem ? " · show" : ""}
+                      {blockingCount} problem{blockingCount === 1 ? "" : "s"}{firstProblem ? " · show" : ""}
                     </button>
-                  : ordered.length > 0 && <span className="badge badge-good">Ready to run</span>}
+                  : ordered.length > 0 && !full && <span className="badge badge-good">Ready to run</span>}
                 {problems.filter((p) => p.position === null).map((p) => <span key={p.message} className={`badge badge-${p.blocking ? "bad" : "warn"}`}>{p.message}</span>)}
               </div>
             </Panel>
@@ -175,12 +194,12 @@ function Canvas({ chainId, steps, model, supported, sample }: { chainId: string;
           </ReactFlow>
         </div>
         {panelOpen && (
-          <aside className={`chain-panel${full ? " is-full" : ""}`} aria-label={panelStep ? `Edit step ${panelPosition}` : `New step ${panelPosition}`}>
+          <aside className="chain-panel" aria-label={panelStep ? `Edit step ${panelPosition}` : `New step ${panelPosition}`}>
             <div className="panel-resize" role="separator" aria-orientation="vertical" aria-label="Resize the step editor" onPointerDown={resize} />
             <StepPanel key={panelStep ? `${panelStep.id}:${panelPosition}` : `new:${draftAt}`} chainId={chainId} step={panelStep} position={panelPosition}
-              insertAt={panelStep ? null : draftAt} model={model} names={ordered.map((s) => s.name)}
+              insertAt={panelStep ? null : draftAt} model={model} before={ordered.slice(0, panelPosition - 1)}
               problems={problems.filter((p) => panelStep && p.position === panelPosition)} sample={sample}
-              onClose={close} onSaved={onSaved} onDirty={onDirty} full={full} onToggleFull={() => setFull((f) => !f)} />
+              onClose={close} onSaved={onSaved} onDirty={onDirty} />
           </aside>
         )}
       </div>
@@ -191,7 +210,7 @@ function Canvas({ chainId, steps, model, supported, sample }: { chainId: string;
 function Toolbar({ onAdd, chainId }: { onAdd: () => void; chainId: string }) {
   const { zoomIn, zoomOut, fitView } = useReactFlow();
   const { zoom } = useViewport();
-  const { count } = useActions();
+  const { count, fullscreen, toggleFullscreen } = useActions();
   return (
     <div className="canvas-toolbar" role="toolbar" aria-label="Canvas">
       <button type="button" className="btn btn-icon" aria-label="Zoom out" onClick={() => zoomOut({ duration: 150 })}>−</button>
@@ -201,6 +220,8 @@ function Toolbar({ onAdd, chainId }: { onAdd: () => void; chainId: string }) {
       <span className="sep" />
       <button type="button" className="btn btn-sm" onClick={onAdd} disabled={count >= 20}>＋ Add step</button>
       <Link className="btn btn-sm btn-primary" href={`/chains/${chainId}/run`}>▶ Run chain</Link>
+      <span className="sep" />
+      <button type="button" className="btn btn-sm" aria-pressed={fullscreen} onClick={toggleFullscreen} title={fullscreen ? "Back to the page (Esc)" : "Canvas and editor as a full screen"}>{fullscreen ? "⤡ Exit" : "⤢ Full screen"}</button>
     </div>
   );
 }
@@ -208,16 +229,24 @@ function Toolbar({ onAdd, chainId }: { onAdd: () => void; chainId: string }) {
 const StepNode = memo(function StepNode({ id, data }: NodeProps<StepNodeType>) {
   const { open, test, move, busy, count } = useActions();
   const [menu, setMenu] = useState(false);
-  const { step, index, problems, selected } = data;
+  const { step, index, problems, selected, before, lastRun } = data;
   const n = index + 1;
   const blocking = problems.some((p) => p.blocking);
-  const inputs = stepInputs(step, n);
+  const inputs = stepInputs(step, n, before);
   const provider = step.model?.provider ?? "none";
+  // Status: not set up (no model) › problem › last run › ready.
+  const status = !step.model ? { label: "Not set up", tone: "warn" }
+    : blocking ? { label: "Problem", tone: "bad" }
+    : lastRun === "completed" ? { label: "Last run ✓", tone: "good" }
+    : lastRun === "failed" ? { label: "Last run failed", tone: "bad" }
+    : { label: "Ready", tone: "" };
   return (
     <div className={`cnode provider-${provider}${selected ? " is-selected" : ""}${blocking ? " has-problem" : problems.length ? " has-warning" : ""}`}>
-      <Handles />
+      <Handle type="target" position={Position.Left} id="l" className="anchor" title="Input: drop a connection here to run this step right after that one" />
+      <Handle type="source" position={Position.Right} id="r" className="anchor" title="Output: drag to another step's input to run it right after this one" />
       <div className="cnode-head">
-        <span className="cnode-num">{n}</span>
+        <span className="cnode-num" aria-hidden="true">{n}</span>
+        <span className="cnode-icon" aria-hidden="true">{step.output_kind === "captions" ? "✦" : "✎"}</span>
         <b className="cnode-title" title={step.name}>{step.name}</b>
         <button type="button" className="cnode-btn nodrag nopan" aria-label={`Test step ${n}`} title="Test this step" onClick={(e) => { e.stopPropagation(); test(id); }}>▶</button>
         <button type="button" className="cnode-btn nodrag nopan" aria-label={`Step ${n} menu`} aria-expanded={menu} onClick={(e) => { e.stopPropagation(); setMenu(!menu); }}>⋯</button>
@@ -229,11 +258,12 @@ const StepNode = memo(function StepNode({ id, data }: NodeProps<StepNodeType>) {
           <button type="button" role="menuitem" aria-label={`Move step ${n} right`} disabled={index === count - 1 || busy} onClick={() => { setMenu(false); move(index, index + 1); }}>Move right →</button>
         </div>
       )}
+      <span className={`cnode-status${status.tone ? ` tone-${status.tone}` : ""}`}>{status.label}</span>
       <dl className="cnode-rows">
         <dt>Input</dt>
-        <dd>{inputs.length ? inputs.map((i) => <span key={i.token} className={`tag${i.ok ? "" : " tag-bad"}`}>{i.label}</span>) : <span className="muted">none</span>}</dd>
+        <dd>{inputs.length ? inputs.map((i) => <span key={i.token} className={`tag${i.ok ? "" : " tag-bad"}`} title={i.ok ? undefined : "Not available at this position"}>{i.label} <i>{i.type}</i></span>) : <span className="muted">none</span>}</dd>
         <dt>Output</dt>
-        <dd><span className={`tag${step.output_kind === "captions" ? " tag-brand" : ""}`}>{step.output_kind === "captions" ? "captions" : `text → step${n}`}</span></dd>
+        <dd><span className={`tag${step.output_kind === "captions" ? " tag-brand" : ""}`}>{step.output_kind === "captions" ? <>captions <i>JSON</i></> : <>step{n} <i>String</i></>}</span></dd>
         <dt>Model</dt>
         <dd className="cnode-model">{step.model ? `${providerLabel(step.model.provider)} · ${step.model.model_id}` : <span className="tag tag-bad">none</span>}</dd>
       </dl>
@@ -249,24 +279,12 @@ const StepNode = memo(function StepNode({ id, data }: NodeProps<StepNodeType>) {
 function EndNode({ id, data }: NodeProps<Node<EndData>>) {
   return (
     <div className={`cnode-end ${id}`}>
-      <Handles />
+      {id === "photo"
+        ? <Handle type="source" position={Position.Right} id="r" className="anchor" title="Drag to a step to run it first" />
+        : <Handle type="target" position={Position.Left} id="l" className="anchor" title="Drop a step's output here to run it last" />}
       <b>{data.label}</b>
       <span className="hint">{data.detail}</span>
     </div>
-  );
-}
-
-// Hidden anchor points: sides for neighbours, top for data arcs, bottom for photo arcs.
-function Handles() {
-  return (
-    <>
-      <Handle type="target" position={Position.Left} id="l" isConnectable={false} />
-      <Handle type="source" position={Position.Right} id="r" isConnectable={false} />
-      <Handle type="source" position={Position.Top} id="ts" isConnectable={false} />
-      <Handle type="target" position={Position.Top} id="tt" isConnectable={false} />
-      <Handle type="source" position={Position.Bottom} id="bs" isConnectable={false} />
-      <Handle type="target" position={Position.Bottom} id="bt" isConnectable={false} />
-    </>
   );
 }
 
@@ -277,13 +295,12 @@ function FlowEdge({ id, sourceX, sourceY, targetX, targetY, data }: EdgeProps<Ed
   const { insert, count } = useActions();
   const [path, lx, ly] = getStraightPath({ sourceX, sourceY, targetX, targetY });
   const t = tone(data!.kind);
-  const at = data!.insertAt!;
+  const at = data!.insertAt;
   return (
     <>
       <BaseEdge id={id} path={path} className={`cedge cedge-${t}${data!.kind === "order" ? " dashed" : ""}`} markerEnd={`url(#cm-${t})`} />
       <EdgeLabelRenderer>
         <div className="cedge-label nodrag nopan" style={{ transform: `translate(-50%, -50%) translate(${lx}px, ${ly}px)` }}>
-          {data!.label && <span className="cedge-text">{data!.label}</span>}
           {count < 20 && <button type="button" className="cedge-add" aria-label={at > count ? "Add a step at the end" : `Insert a step before step ${at}`} title="Insert a step here" onClick={() => insert(at)}>+</button>}
         </div>
       </EdgeLabelRenderer>
@@ -291,26 +308,8 @@ function FlowEdge({ id, sourceX, sourceY, targetX, targetY, data }: EdgeProps<Ed
   );
 }
 
-// Arc over (data reference) or under (photo) the steps it skips.
-function ArcEdge({ id, sourceX, sourceY, targetX, targetY, data }: EdgeProps<Edge<EdgeData>>) {
-  const up = data!.side === "top";
-  const h = (34 + 26 * Math.min(data!.span ?? 2, 6)) * (up ? -1 : 1);
-  const path = `M${sourceX},${sourceY} C${sourceX},${sourceY + h} ${targetX},${targetY + h} ${targetX},${targetY}`;
-  const t = tone(data!.kind);
-  return (
-    <>
-      <BaseEdge id={id} path={path} className={`cedge cedge-${t}`} markerEnd={`url(#cm-${t})`} />
-      {data!.label && (
-        <EdgeLabelRenderer>
-          <span className="cedge-text cedge-label" style={{ transform: `translate(-50%, -50%) translate(${(sourceX + targetX) / 2}px, ${sourceY + h * 0.75}px)` }}>{data!.label}</span>
-        </EdgeLabelRenderer>
-      )}
-    </>
-  );
-}
-
 const NODE_TYPES = { step: StepNode, photo: EndNode, result: EndNode };
-const EDGE_TYPES = { flow: FlowEdge, arc: ArcEdge };
+const EDGE_TYPES = { flow: FlowEdge };
 
 // Arrowheads in each edge colour (SVG markers shared by every edge).
 function CanvasMarkers() {

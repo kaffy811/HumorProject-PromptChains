@@ -213,29 +213,38 @@ import { chainModelOf } from "../lib/chain-rules";
   console.log("PASS chain model.");
 }
 
-// Canvas layout: photo → steps → result, insert points, arcs, inputs.
-import { availableInputs, canvasLayout, stepInputs } from "../lib/canvas";
+// Canvas: only neighbours are connected; drag output → input reorders; typed variables.
+import { canvasLayout, orderAfterConnect, stepInputs, variablesFor } from "../lib/canvas";
 {
-  const s = (id: string, user_prompt: string, include_image = false, output_kind = "text") => ({ id, user_prompt, include_image, output_kind });
-  const three = [s("a", "Look. {direction}", true), s("b", "Angles on {previous}"), s("c", "{step1} / {previous}", false, "captions")];
+  const s = (id: string, user_prompt: string, include_image = false, output_kind = "text", name = id) => ({ id, name, user_prompt, include_image, output_kind });
+  const three = [s("a", "Look. {direction}", true), s("b", "Angles on {previous}"), s("c", "{step1} / {direction}", false, "captions")];
   const { nodes, edges } = canvasLayout(three);
   assert.deepEqual(nodes.map((n) => [n.id, n.type]), [["photo", "photo"], ["a", "step"], ["b", "step"], ["c", "step"], ["result", "result"]]);
   assert.ok(nodes.every((n, i) => i === 0 || n.x > nodes[i - 1].x + nodes[i - 1].width), "left to right without overlap");
-  const by = Object.fromEntries(edges.map((e) => [e.id, e]));
-  assert.deepEqual([by["photo>a"].kind, by["photo>a"].insertAt], ["photo", 1], "insert before step 1");
-  assert.deepEqual([by["a>b"].kind, by["a>b"].insertAt, by["a>b"].label], ["previous", 2, "{previous}"]);
-  assert.deepEqual([by["c>result"].kind, by["c>result"].insertAt], ["result", 4], "append at the end");
-  assert.deepEqual([by["a>c"].adjacent, by["a>c"].side, by["a>c"].span, by["a>c"].label], [false, "top", 2, "{step1}"], "{step1} arcs over step 2");
-  // A later step that sees the photo gets an arc below; step 1 not seeing it still starts the chain.
-  const photoLate = canvasLayout([s("a", "x {direction}"), s("b", "{previous}", true)]);
-  assert.equal(photoLate.edges.find((e) => e.id === "photo>a")!.kind, "order");
-  assert.deepEqual(photoLate.edges.find((e) => e.id === "photo>b")!.side, "bottom");
-  // Empty chain: photo straight to result, insert at 1.
-  const empty = canvasLayout([]);
-  assert.deepEqual(empty.edges.map((e) => [e.id, e.insertAt]), [["photo>result", 1]]);
-  assert.deepEqual(stepInputs({ include_image: true, user_prompt: "{direction} {previous} {previous} {step3}" }, 2).map((i) => [i.label, i.ok]), [["photo", true], ["direction", true], ["previous", true], ["step3", false]]);
-  assert.deepEqual(stepInputs({ include_image: false, user_prompt: "{previous}" }, 1).map((i) => i.ok), [false], "{previous} in step 1");
-  assert.deepEqual(availableInputs(1, []).map((i) => i.token), ["{direction}"]);
-  assert.deepEqual(availableInputs(3, ["Look", "Angles"]).map((i) => [i.token, i.help]), [["{direction}", 'The direction typed for the run ("none" when empty)'], ["{previous}", "Output of step 2 · Angles"], ["{step1}", "Output of step 1 · Look"], ["{step2}", "Output of step 2 · Angles"]]);
-  console.log("PASS canvas layout and step inputs.");
+  assert.deepEqual(edges.map((e) => [e.id, e.kind, e.insertAt]), [["photo>a", "photo", 1], ["a>b", "data", 2], ["b>c", "order", 3], ["c>result", "result", 4]],
+    "neighbours only: {step1} in step 3 draws no line; b>c is dashed because step 3 does not read step 2");
+  assert.deepEqual(canvasLayout([s("a", "x")]).edges.map((e) => e.kind), ["order", "result"], "photo not seen by step 1");
+  assert.deepEqual(canvasLayout([]).edges.map((e) => [e.id, e.insertAt]), [["photo>result", 1]]);
+  // Drag from A's output to B's input: B runs right after A.
+  const order = ["a", "b", "c", "d"];
+  assert.deepEqual(orderAfterConnect(order, "a", "c"), ["a", "c", "b", "d"]);
+  assert.deepEqual(orderAfterConnect(order, "d", "a"), ["b", "c", "d", "a"]);
+  assert.deepEqual(orderAfterConnect(order, "photo", "c"), ["c", "a", "b", "d"], "photo → step: first");
+  assert.deepEqual(orderAfterConnect(order, "b", "result"), ["a", "c", "d", "b"], "step → captions: last");
+  assert.equal(orderAfterConnect(order, "a", "b"), null, "already next");
+  assert.equal(orderAfterConnect(order, "a", "a"), null);
+  assert.equal(orderAfterConnect(order, "photo", "result"), null);
+  assert.equal(orderAfterConnect(order, "d", "result"), null, "already last");
+  // Inputs with types.
+  assert.deepEqual(stepInputs({ include_image: true, user_prompt: "{direction} {previous} {previous} {step3}" }, 2, [{ output_kind: "captions" }]).map((i) => [i.label, i.type, i.ok]),
+    [["photo", "Image", true], ["direction", "String", true], ["previous", "JSON", true], ["step3", "String", false]]);
+  // Variable picker for step 3: run inputs, then each earlier step's output and what it read.
+  const groups = variablesFor(3, three);
+  assert.deepEqual(groups.map((g) => g.title), ["Run inputs", "Step 1 · a", "Step 2 · b"]);
+  assert.deepEqual(groups[0].vars.map((v) => [v.token, v.type, v.usable]), [["{direction}", "String", true], ["photo", "Image", false]]);
+  assert.deepEqual(groups[1].vars.map((v) => v.token), ["{step1}", "{direction}"], "step 1's output, then what it read");
+  assert.deepEqual(groups[2].vars.map((v) => v.token), ["{step2}", "{previous}", "{step1}"], "{previous} for the step right before; step 2 read step 1, offered as {step1}");
+  assert.deepEqual(variablesFor(1, []).map((g) => g.title), ["Run inputs"]);
+  assert.equal(variablesFor(2, [s("a", "x", true, "captions")])[1].vars[0].type, "JSON");
+  console.log("PASS canvas layout, reorder by connection and variables.");
 }
