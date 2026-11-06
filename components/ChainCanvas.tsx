@@ -233,7 +233,6 @@ const StepNode = memo(function StepNode({ id, data }: NodeProps<StepNodeType>) {
   const n = index + 1;
   const blocking = problems.some((p) => p.blocking);
   const inputs = stepInputs(step, n, before);
-  const provider = step.model?.provider ?? "none";
   // Status: not set up (no model) › problem › last run › ready.
   const status = !step.model ? { label: "Not set up", tone: "warn" }
     : blocking ? { label: "Problem", tone: "bad" }
@@ -241,7 +240,7 @@ const StepNode = memo(function StepNode({ id, data }: NodeProps<StepNodeType>) {
     : lastRun === "failed" ? { label: "Last run failed", tone: "bad" }
     : { label: "Ready", tone: "" };
   return (
-    <div className={`cnode provider-${provider}${selected ? " is-selected" : ""}${blocking ? " has-problem" : problems.length ? " has-warning" : ""}`}>
+    <div className={`cnode${step.model ? "" : " no-model"}${selected ? " is-selected" : ""}${blocking ? " has-problem" : problems.length ? " has-warning" : ""}`}>
       <Handle type="target" position={Position.Left} id="l" className="anchor" title="Input: drop a connection here to run this step right after that one" />
       <Handle type="source" position={Position.Right} id="r" className="anchor" title="Output: drag to another step's input to run it right after this one" />
       <div className="cnode-head">

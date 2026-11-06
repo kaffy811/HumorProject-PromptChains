@@ -229,7 +229,7 @@ details > summary { cursor: pointer; }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --gemini: #1c2a46; --gemini-ink: #9cc0ff; --gpt: #163527; --gpt-ink: #8fe0b4; } }
 .provider-google { background: var(--gemini); color: var(--gemini-ink); }
 .provider-openai { background: var(--gpt); color: var(--gpt-ink); }
-.provider-none { background: var(--danger-bg); color: var(--danger); }
+.provider-none, .mini-node.no-model { background: var(--danger-bg); color: var(--danger); }
 
 /* Dashboard */
 .stat-grid { display: grid; gap: 18px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr)); }
@@ -324,9 +324,8 @@ tr[aria-current="true"] td { background: var(--hover); }
 .canvas-minimap { border: 2px solid var(--edge); }
 .canvas-minimap .react-flow__minimap-node { fill: var(--muted); stroke: var(--edge); }
 .cnode { width: 280px; background: var(--card); border: 2px solid var(--edge); box-shadow: var(--shadow-sm); padding: 10px 12px 12px; position: relative; font-size: 13px; }
-.cnode.provider-google { border-top: 6px solid var(--gemini-ink); }
-.cnode.provider-openai { border-top: 6px solid var(--gpt-ink); }
-.cnode.provider-none { border-top: 6px solid var(--danger); }
+.cnode { border-top: 6px solid var(--tomato); }
+.cnode.no-model { border-top-color: var(--danger); }
 .cnode.is-selected { box-shadow: 0 0 0 3px var(--tomato), var(--shadow); }
 .cnode.has-problem { border-color: var(--danger); background: color-mix(in srgb, var(--danger-bg) 45%, var(--card)); }
 .cnode.has-warning { border-color: var(--warn); }
