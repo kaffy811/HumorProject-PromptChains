@@ -16,9 +16,11 @@ const schemaText = (value: unknown) => (value ? JSON.stringify(value, null, 2) :
 // The step editor beside the canvas: collapsible sections, the chain's model
 // shown (never chosen here), explicit save with an unsaved-changes marker and
 // Ctrl/⌘+S, and "Test this step". step = null adds a step at insertAt.
-export function StepPanel({ chainId, step, position, insertAt, model, names, problems, sample, onClose, onSaved, onDirty }: {
+export function StepPanel({ chainId, step, position, insertAt, model, names, problems, sample, onClose, onSaved, onDirty, full = false, onToggleFull }: {
   chainId: string; step: PanelStep | null; position: number; insertAt: number | null; model: ModelOption | null; names: string[];
   problems: Problem[]; sample: RunSample | null; onClose: () => void; onSaved: (id: string) => void; onDirty: (dirty: boolean) => void;
+  // Full page: the editor takes the whole screen (prompts beside the settings).
+  full?: boolean; onToggleFull?: () => void;
 }) {
   const formId = useId();
   const form = useRef<HTMLFormElement>(null);
@@ -91,6 +93,11 @@ export function StepPanel({ chainId, step, position, insertAt, model, names, pro
         </div>
         {dirty && <span className="badge badge-warn">Unsaved</span>}
         {step && <button type="button" className="btn btn-icon" title="Test this step" aria-label="Test this step" onClick={openTest}>▶</button>}
+        {onToggleFull && (
+          <button type="button" className="btn btn-sm" aria-pressed={full} title={full ? "Back to the canvas (Esc)" : "Open this step as a full page"} onClick={onToggleFull}>
+            {full ? "⤡ Back to canvas" : "⤢ Full page"}
+          </button>
+        )}
         <button type="button" className="btn btn-icon" title="Close" aria-label="Close the step editor" onClick={onClose}>✕</button>
       </header>
       <div className="panel-body">
@@ -101,7 +108,8 @@ export function StepPanel({ chainId, step, position, insertAt, model, names, pro
           {insertAt && <input type="hidden" name="insert_at" value={insertAt} />}
           {/* Sent only for "Test this step"; saving never changes a step's model. */}
           <input type="hidden" name="llm_model_id" value={model?.id ?? ""} />
-          <Section title="Basics">
+          <div className="panel-cols"><div className="col-side">
+          <Section title="Basics" order={1}>
             <div className="field">
               <label htmlFor={`${formId}-name`}>Step name</label>
               <input id={`${formId}-name`} name="name" className="input" required maxLength={80} value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Look at the photo" />
@@ -120,7 +128,7 @@ export function StepPanel({ chainId, step, position, insertAt, model, names, pro
               </label>
             </div>
           </Section>
-          <Section title="Inputs" hint="click to insert into the user prompt">
+          <Section title="Inputs" hint="click to insert into the user prompt" order={2}>
             <ul className="inputs">
               {sees && <li><span className="chip chip-static">photo</span><span className="hint">The run&apos;s photo is attached to this step</span></li>}
               {availableInputs(position, names).map((i) => (
@@ -131,14 +139,8 @@ export function StepPanel({ chainId, step, position, insertAt, model, names, pro
               ))}
             </ul>
           </Section>
-          <Section title="System prompt" action={<button type="button" className="btn btn-icon" aria-label="Expand the system prompt" title="Expand" onClick={() => setExpanded("system")}>⤢</button>}>
-            <textarea name="system_prompt" className="textarea" aria-label="System prompt" required maxLength={20000} rows={8} value={system} onChange={(e) => setSystem(e.target.value)} placeholder="Who the model is and the rules it follows." />
-          </Section>
-          <Section title="User prompt" action={<button type="button" className="btn btn-icon" aria-label="Expand the user prompt" title="Expand" onClick={() => setExpanded("user")}>⤢</button>}>
-            <textarea ref={userBox} name="user_prompt" className="textarea" aria-label="User prompt" required maxLength={4000} rows={7} value={user} onChange={(e) => setUser(e.target.value)} placeholder="What to do with the photo and/or earlier output." />
-            <PromptPreview template={user} system={system} position={position} sees={sees} />
-          </Section>
-          <Section title="Output">
+
+          <Section title="Output" order={5}>
             {kind === "captions" ? (
               <div className="field">
                 <label htmlFor={`${formId}-schema`}>JSON schema <span className="muted">(optional)</span></label>
@@ -147,7 +149,23 @@ export function StepPanel({ chainId, step, position, insertAt, model, names, pro
               </div>
             ) : <p className="hint" style={{ margin: 0 }}>Plain text. Later steps read it as <span className="mono">{"{previous}"}</span> (the next step) or <span className="mono">{`{step${position}}`}</span>.</p>}
           </Section>
-          {step && <div ref={tryBox}><StepTry position={position} template={user} sees={sees} sample={sample} /></div>}
+          {step && <div ref={tryBox} style={{ order: 6 }}><StepTry position={position} template={user} sees={sees} sample={sample} /></div>}
+          </div><div className="col-main">
+          <Section title="System prompt" order={3} action={<button type="button" className="btn btn-icon" aria-label="Expand the system prompt" title="Expand" onClick={() => setExpanded("system")}>⤢</button>}>
+            <textarea name="system_prompt" className="textarea" aria-label="System prompt" required maxLength={20000} rows={8} value={system} onChange={(e) => setSystem(e.target.value)}
+              placeholder={"Who the model is and the rules it follows.\n\nExample:\nYou write captions for Columbia students. Each caption is under 25 words, with the punchline at the end. No hashtags or emojis."} />
+            <span className="hint">Fixed instructions. <b>{"{…}"} inputs are not filled here</b>: put {"{direction}"}, {"{previous}"} or {"{stepN}"} in the user prompt.</span>
+          </Section>
+          <Section title="User prompt" order={4} action={<button type="button" className="btn btn-icon" aria-label="Expand the user prompt" title="Expand" onClick={() => setExpanded("user")}>⤢</button>}>
+            <textarea ref={userBox} name="user_prompt" className="textarea" aria-label="User prompt" required maxLength={4000} rows={7} value={user} onChange={(e) => setUser(e.target.value)}
+              placeholder={userExample(position, sees)} />
+            <span className="hint">
+              <b>Inputs go in curly braces {"{ }"}</b> and are replaced when the step runs: {availableInputs(position, names).map((i) => i.token).join(", ")}{sees ? " (the photo is attached on its own)" : ""}. Click one under Inputs to insert it.
+              {" "}<b>Output</b>: this step&apos;s reply{kind === "captions" ? " must be the captions JSON" : <> becomes <span className="mono">{`{step${position}}`}</span> (and <span className="mono">{"{previous}"}</span> for the next step)</>}.
+            </span>
+            <PromptPreview template={user} system={system} position={position} sees={sees} />
+          </Section>
+          </div></div>
         </form>
         {expanded && (
           <div className="prompt-modal" role="dialog" aria-modal="true" aria-label={expanded === "system" ? "System prompt" : "User prompt"}
@@ -175,9 +193,9 @@ export function StepPanel({ chainId, step, position, insertAt, model, names, pro
   );
 }
 
-function Section({ title, hint, action, children }: { title: string; hint?: string; action?: React.ReactNode; children: React.ReactNode }) {
+function Section({ title, hint, action, order, children }: { title: string; hint?: string; action?: React.ReactNode; order: number; children: React.ReactNode }) {
   return (
-    <details className="panel-section" open>
+    <details className="panel-section" open style={{ order }}>
       <summary>
         <span className="panel-section-title">{title}</span>
         {hint && <span className="hint">{hint}</span>}
@@ -186,4 +204,15 @@ function Section({ title, hint, action, children }: { title: string; hint?: stri
       <div className="panel-section-body">{children}</div>
     </details>
   );
+}
+
+// Placeholder text for the user prompt: how {…} inputs work, with an example
+// using the inputs this step can actually read.
+function userExample(position: number, sees: boolean) {
+  const lines = ["What this step should do. Put inputs in curly braces { } — they are replaced when it runs:", "  {direction} = the member's direction (\"none\" when empty)"];
+  if (position > 1) lines.push("  {previous} = the output of the step before", `  {step1}…{step${position - 1}} = the output of that step`);
+  lines.push("", "Example:");
+  if (position === 1) lines.push(sees ? "Describe this photo in 3 to 5 sentences." : "List 5 everyday Columbia student moments.", "The member's direction: {direction}");
+  else lines.push("Photo description:", "{step1}", "", "Ideas so far:", "{previous}", "", "The member's direction: {direction}", "Write 4 captions from the best ideas.");
+  return lines.join("\n");
 }
