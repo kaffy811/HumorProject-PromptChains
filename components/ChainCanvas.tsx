@@ -171,13 +171,6 @@ function Canvas({ chainId, steps, model, supported, sample }: { chainId: string;
                 {problems.filter((p) => p.position === null).map((p) => <span key={p.message} className={`badge badge-${p.blocking ? "bad" : "warn"}`}>{p.message}</span>)}
               </div>
             </Panel>
-            <Panel position="top-right">
-              <div className="canvas-legend" aria-hidden="true">
-                <span><i className="flow-key flow-tomato" />passes output</span>
-                <span><i className="flow-key flow-photo" />sees the photo</span>
-                <span><i className="flow-key flow-muted dashed" />runs next</span>
-              </div>
-            </Panel>
             <Panel position="bottom-center"><Toolbar onAdd={() => insert(ordered.length + 1)} chainId={chainId} /></Panel>
           </ReactFlow>
         </div>

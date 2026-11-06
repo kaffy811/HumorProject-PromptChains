@@ -364,7 +364,6 @@ tr[aria-current="true"] td { background: var(--hover); }
 .cedge-add:hover, .cedge-add:focus-visible { opacity: 1; background: var(--tomato); color: var(--on-tomato); }
 .canvas-status { display: flex; gap: 6px; flex-wrap: wrap; max-width: 520px; }
 .as-button { cursor: pointer; font: inherit; font: 700 10.5px var(--font-label); }
-.canvas-legend { display: flex; gap: 12px; font-size: 11px; color: var(--muted); background: var(--card); border: 1.5px solid var(--edge); padding: 4px 8px; }
 .canvas-toolbar { display: flex; align-items: center; gap: 6px; background: var(--card); border: 2px solid var(--edge); box-shadow: var(--shadow); padding: 6px 8px; }
 .canvas-toolbar .zoom { min-width: 46px; text-align: center; }
 .canvas-toolbar .sep { width: 2px; align-self: stretch; background: var(--line, var(--edge)); opacity: .3; margin: 0 4px; }
@@ -395,7 +394,6 @@ tr[aria-current="true"] td { background: var(--hover); }
   .chain-panel { position: fixed; inset: 0; z-index: 40; height: auto; border-left: 0; }
   .panel-resize { display: none; }
   .canvas { height: 480px; }
-  .canvas-legend { display: none; }
 }
 
 /* Step editor columns: one column beside the canvas (sections keep their order),
