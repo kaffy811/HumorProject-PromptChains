@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useId, useRef, useState, useTransition } from "react";
 import { createStep, deleteStep, updateStep } from "@/lib/actions";
-import { availableInputs } from "@/lib/canvas";
+import { variablesFor, type VariableGroup } from "@/lib/canvas";
 import type { Problem } from "@/lib/chain-rules";
 import type { ModelOption } from "@/lib/data";
 import { PromptPreview } from "@/components/PromptPreview";
@@ -16,11 +16,11 @@ const schemaText = (value: unknown) => (value ? JSON.stringify(value, null, 2) :
 // The step editor beside the canvas: collapsible sections, the chain's model
 // shown (never chosen here), explicit save with an unsaved-changes marker and
 // Ctrl/⌘+S, and "Test this step". step = null adds a step at insertAt.
-export function StepPanel({ chainId, step, position, insertAt, model, names, problems, sample, onClose, onSaved, onDirty, full = false, onToggleFull }: {
-  chainId: string; step: PanelStep | null; position: number; insertAt: number | null; model: ModelOption | null; names: string[];
+export function StepPanel({ chainId, step, position, insertAt, model, before, problems, sample, onClose, onSaved, onDirty }: {
+  chainId: string; step: PanelStep | null; position: number; insertAt: number | null; model: ModelOption | null;
+  // The steps that run before this one (their names, outputs and what they read).
+  before: { name: string; include_image: boolean; user_prompt: string; output_kind: string }[];
   problems: Problem[]; sample: RunSample | null; onClose: () => void; onSaved: (id: string) => void; onDirty: (dirty: boolean) => void;
-  // Full page: the editor takes the whole screen (prompts beside the settings).
-  full?: boolean; onToggleFull?: () => void;
 }) {
   const formId = useId();
   const form = useRef<HTMLFormElement>(null);
@@ -71,9 +71,16 @@ export function StepPanel({ chainId, step, position, insertAt, model, names, pro
       else { onDirty(false); onClose(); }
     });
   };
+  const groups = variablesFor(position, before);
+  const tokens = [...new Set(groups.flatMap((g) => g.vars.filter((v) => v.usable).map((v) => v.token)))];
+  // The variable picker: from the {x} button, or after typing "{" in the user prompt (that "{" is then replaced).
+  const [picker, setPicker] = useState<"button" | "brace" | null>(null);
   const insert = (token: string) => {
     const box = userBox.current;
-    const from = box?.selectionStart ?? user.length, to = box?.selectionEnd ?? user.length;
+    let from = box?.selectionStart ?? user.length;
+    const to = box?.selectionEnd ?? user.length;
+    if (picker === "brace" && user[from - 1] === "{") from -= 1;
+    setPicker(null);
     setUser(user.slice(0, from) + token + user.slice(to));
     requestAnimationFrame(() => { box?.focus(); box?.setSelectionRange(from + token.length, from + token.length); });
   };
@@ -93,11 +100,6 @@ export function StepPanel({ chainId, step, position, insertAt, model, names, pro
         </div>
         {dirty && <span className="badge badge-warn">Unsaved</span>}
         {step && <button type="button" className="btn btn-icon" title="Test this step" aria-label="Test this step" onClick={openTest}>▶</button>}
-        {onToggleFull && (
-          <button type="button" className="btn btn-sm" aria-pressed={full} title={full ? "Back to the canvas (Esc)" : "Open this step as a full page"} onClick={onToggleFull}>
-            {full ? "⤡ Back to canvas" : "⤢ Full page"}
-          </button>
-        )}
         <button type="button" className="btn btn-icon" title="Close" aria-label="Close the step editor" onClick={onClose}>✕</button>
       </header>
       <div className="panel-body">
@@ -128,16 +130,8 @@ export function StepPanel({ chainId, step, position, insertAt, model, names, pro
               </label>
             </div>
           </Section>
-          <Section title="Inputs" hint="click to insert into the user prompt" order={2}>
-            <ul className="inputs">
-              {sees && <li><span className="chip chip-static">photo</span><span className="hint">The run&apos;s photo is attached to this step</span></li>}
-              {availableInputs(position, names).map((i) => (
-                <li key={i.token}>
-                  <button type="button" className="chip" onClick={() => insert(i.token)} title={`Insert ${i.token}`}>{i.token}</button>
-                  <span className="hint">{i.help}</span>
-                </li>
-              ))}
-            </ul>
+          <Section title="Variables" hint="from the run and earlier steps · click to insert" order={2}>
+            <VariableList groups={groups} sees={sees} onPick={insert} />
           </Section>
 
           <Section title="Output" order={5}>
@@ -156,11 +150,29 @@ export function StepPanel({ chainId, step, position, insertAt, model, names, pro
               placeholder={"Who the model is and the rules it follows.\n\nExample:\nYou write captions for Columbia students. Each caption is under 25 words, with the punchline at the end. No hashtags or emojis."} />
             <span className="hint">Fixed instructions. <b>{"{…}"} inputs are not filled here</b>: put {"{direction}"}, {"{previous}"} or {"{stepN}"} in the user prompt.</span>
           </Section>
-          <Section title="User prompt" order={4} action={<button type="button" className="btn btn-icon" aria-label="Expand the user prompt" title="Expand" onClick={() => setExpanded("user")}>⤢</button>}>
-            <textarea ref={userBox} name="user_prompt" className="textarea" aria-label="User prompt" required maxLength={4000} rows={7} value={user} onChange={(e) => setUser(e.target.value)}
+          <Section title="User prompt" order={4} action={<span className="row" style={{ gap: 6 }}>
+            <button type="button" className="btn btn-sm" aria-haspopup="dialog" aria-expanded={!!picker} onClick={() => setPicker(picker ? null : "button")} title="Insert a variable from the run or an earlier step">{"{x}"} Insert variable</button>
+            <button type="button" className="btn btn-icon" aria-label="Expand the user prompt" title="Expand" onClick={() => setExpanded("user")}>⤢</button>
+          </span>}>
+            {picker && (
+              <div className="var-popover" role="dialog" aria-label="Insert a variable" onKeyDown={(e) => { if (e.key === "Escape") { e.stopPropagation(); setPicker(null); userBox.current?.focus(); } }}>
+                <div className="row" style={{ justifyContent: "space-between" }}>
+                  <b>Insert a variable</b>
+                  <button type="button" className="btn btn-icon" aria-label="Close the variable list" onClick={() => setPicker(null)}>✕</button>
+                </div>
+                <VariableList groups={groups} sees={sees} onPick={insert} autoFocus={picker === "button"} />
+              </div>
+            )}
+            <textarea ref={userBox} name="user_prompt" className="textarea" aria-label="User prompt" required maxLength={4000} rows={7} value={user}
+              onChange={(e) => {
+                const value = e.target.value, caret = e.target.selectionStart;
+                // Typing "{" opens the picker at once.
+                if (value.length === user.length + 1 && value[caret - 1] === "{") setPicker("brace");
+                setUser(value);
+              }}
               placeholder={userExample(position, sees)} />
             <span className="hint">
-              <b>Inputs go in curly braces {"{ }"}</b> and are replaced when the step runs: {availableInputs(position, names).map((i) => i.token).join(", ")}{sees ? " (the photo is attached on its own)" : ""}. Click one under Inputs to insert it.
+              <b>Inputs go in curly braces {"{ }"}</b> and are replaced when the step runs: {tokens.join(", ")}{sees ? " (the photo is attached on its own)" : ""}. Type <span className="mono">{"{"}</span> or use {"{x}"} Insert variable to pick one.
               {" "}<b>Output</b>: this step&apos;s reply{kind === "captions" ? " must be the captions JSON" : <> becomes <span className="mono">{`{step${position}}`}</span> (and <span className="mono">{"{previous}"}</span> for the next step)</>}.
             </span>
             <PromptPreview template={user} system={system} position={position} sees={sees} />
@@ -215,4 +227,29 @@ function userExample(position: number, sees: boolean) {
   if (position === 1) lines.push(sees ? "Describe this photo in 3 to 5 sentences." : "List 5 everyday Columbia student moments.", "The member's direction: {direction}");
   else lines.push("Photo description:", "{step1}", "", "Ideas so far:", "{previous}", "", "The member's direction: {direction}", "Write 4 captions from the best ideas.");
   return lines.join("\n");
+}
+
+// Variables grouped by where they come from, each with its type. Unusable ones
+// (the photo, or something not available yet) explain why instead of inserting.
+function VariableList({ groups, sees, onPick, autoFocus = false }: { groups: VariableGroup[]; sees: boolean; onPick: (token: string) => void; autoFocus?: boolean }) {
+  return (
+    <div className="var-groups">
+      {groups.map((g, gi) => (
+        <div key={g.title} className="var-group">
+          <span className="var-group-title">{g.title}</span>
+          <ul>
+            {g.vars.map((v, vi) => (
+              <li key={v.token + v.name}>
+                {v.usable
+                  ? <button type="button" className="chip" autoFocus={autoFocus && gi === 0 && vi === 0} onClick={() => onPick(v.token)} title={`Insert ${v.token}`}>{v.token}</button>
+                  : <span className={`chip chip-static${v.token === "photo" && sees ? " is-on" : ""}`}>{v.token}</span>}
+                <span className={`type type-${v.type.toLowerCase()}`}>{v.type}</span>
+                <span className="hint">{v.token === "photo" && sees ? "Attached to this step (Sees the photo is on)." : v.usable ? v.help : v.why ?? v.help}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ))}
+    </div>
+  );
 }

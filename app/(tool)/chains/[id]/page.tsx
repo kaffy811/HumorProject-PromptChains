@@ -77,10 +77,10 @@ export default async function EditChain({ params, searchParams }: { params: Prom
         <div className="card-head" style={{ marginBottom: 10 }}>
           <div>
             <h2>Steps</h2>
-            <p className="sub" style={{ margin: 0 }}>Click a step to edit it on the right. Scroll or pinch to zoom, drag the background to move around, <b>+</b> on an arrow inserts a step there, and each step&apos;s ⋯ menu moves it left or right. Every step runs on {model ? <strong>{model.label}</strong> : "the chain's model"}.</p>
+            <p className="sub" style={{ margin: 0 }}>Click a step to edit it on the right. Scroll or pinch to zoom and drag the background to move around. <b>+</b> on an arrow inserts a step there; drag from a step&apos;s right point to another step&apos;s left point to run that one right after it. ⤢ Full screen gives the canvas and editor the whole window. Every step runs on {model ? <strong>{model.label}</strong> : "the chain's model"}.</p>
           </div>
         </div>
-        <ChainCanvas chainId={chain.id} steps={steps} model={model} supported={SUPPORTED_PROVIDERS} sample={sample} />
+        <ChainCanvas chainId={chain.id} chainName={chain.name} steps={steps} model={model} supported={SUPPORTED_PROVIDERS} sample={sample} />
       </section>
     </div>
   );
