@@ -96,7 +96,7 @@ async function syncInputs(db: Db, chainId: string) {
   const steps = (data ?? []) as { id: string; position: number; name: string; system_prompt: string; user_prompt: string; output_kind: string }[];
   const names = steps.map((s) => s.name);
   for (const [i, step] of steps.entries()) {
-    const next = { ...simpleStep(step, i + 1, names), output_kind: stepKind(i + 1, steps.length) };
+    const next = { ...simpleStep(step, i + 1, names, i + 1 === steps.length), output_kind: stepKind(i + 1, steps.length) };
     if (next.system_prompt === step.system_prompt && next.user_prompt === step.user_prompt && next.output_kind === step.output_kind) continue;
     await db.from("humor_prompt_chain_steps").update(next).eq("id", step.id);
   }

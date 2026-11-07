@@ -122,9 +122,14 @@ export function chainModelOf(own: string | null | undefined, steps: { position: 
 // everywhere (tool, Humor Admin, member app read it as an ordinary template):
 // the member's input, then every earlier step's output once, by name.
 // Migration 202611070002 builds the identical text in SQL.
-export function stepTemplate(position: number, earlierNames: string[]) {
+// The last step also gets the output rule, so its answer is the four captions
+// the member app accepts whatever its Prompt says (and OpenAI's JSON mode,
+// which needs the word JSON, works).
+export const OUTPUT_RULE = 'Return JSON only, with exactly 4 captions, each in a different style from: deadpan, roast, pun, dad joke, absurd, wholesome. Format: {"captions":[{"caption":"...","style":"deadpan"}]}';
+export function stepTemplate(position: number, earlierNames: string[], last = false) {
   const parts = ["User input: {direction}"];
   for (let k = 1; k < position; k++) parts.push(`Step ${k} output (${(earlierNames[k - 1] ?? `Step ${k}`).replace(/[{}]/g, "")}):\n{step${k}}`);
+  if (last) parts.push(OUTPUT_RULE);
   return parts.join("\n\n");
 }
 // Earlier steps pass text on; the last one returns the captions.
@@ -132,7 +137,8 @@ export const stepKind = (position: number, total: number): OutputKind => (positi
 
 // A template stepTemplate made (whatever the step names were then).
 export function isAutoTemplate(text: string) {
-  return /^User input: \{direction\}(\n\nStep \d{1,2} output \([^\n]*\):\n\{step\d{1,2}\})*$/.test(text);
+  const body = text.endsWith(`\n\n${OUTPUT_RULE}`) ? text.slice(0, -OUTPUT_RULE.length - 2) : text;
+  return /^User input: \{direction\}(\n\nStep \d{1,2} output \([^\n]*\):\n\{step\d{1,2}\})*$/.test(body);
 }
 // A hand-written user prompt (older chains, older versions) turned into plain
 // instructions for the Prompt: lines with {…} go, and so does a "Label:" line
@@ -144,8 +150,8 @@ export function instructionsFrom(userPrompt: string) {
   return kept.join("\n").replace(/\n{3,}/g, "\n\n").trim();
 }
 // The step as a simple step: Prompt (system) with any old instructions appended, generated inputs.
-export function simpleStep(step: { system_prompt: string; user_prompt: string }, position: number, earlierNames: string[]) {
+export function simpleStep(step: { system_prompt: string; user_prompt: string }, position: number, earlierNames: string[], last = false) {
   const extra = isAutoTemplate(step.user_prompt) ? "" : instructionsFrom(step.user_prompt);
   const system = extra && !step.system_prompt.includes(extra) ? `${step.system_prompt.trimEnd()}\n\n${extra}` : step.system_prompt;
-  return { system_prompt: system, user_prompt: stepTemplate(position, earlierNames) };
+  return { system_prompt: system, user_prompt: stepTemplate(position, earlierNames, last) };
 }
