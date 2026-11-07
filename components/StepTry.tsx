@@ -45,7 +45,7 @@ export function StepTry({ position, template, sees, sample }: { position: number
 
   return (
     <details className="field wide try" ref={box}>
-      <summary><span className="label">▶ Test output</span> <span className="hint">run this step once with the Prompt above (saved or not); nothing is stored</span></summary>
+      <summary><span className="label">▶ Test output</span> </summary>
       <div className="stack-sm" style={{ marginTop: 12 }}>
         <div className="form-grid">
           <div className="field">
@@ -67,7 +67,6 @@ export function StepTry({ position, template, sees, sample }: { position: number
             </div>
           ))}
         </div>
-        {sample && needed.length > 0 && <span className="hint">Prefilled from this chain&apos;s latest run; edit freely.</span>}
         <div className="row">
           <button type="button" className="btn btn-sm" onClick={run} disabled={busy}>{busy ? "Running…" : "Run this step"}</button>
           {result && <span className="mono muted">{result.model} · {seconds(result.latencyMs)} · {result.usage.total.toLocaleString("en-US")} tokens</span>}

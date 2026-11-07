@@ -3,7 +3,6 @@ import { useEffect, useId, useRef, useState, useTransition } from "react";
 import { createStep, deleteStep, updateStep } from "@/lib/actions";
 import { stepKind, stepTemplate, type Problem } from "@/lib/chain-rules";
 import type { ModelOption } from "@/lib/data";
-import { estimateTokens } from "@/lib/flow";
 import { StepTry, type RunSample } from "@/components/StepTry";
 
 export type PanelStep = {
@@ -108,39 +107,33 @@ export function StepPanel({ chainId, step, position, insertAt, total, model, bef
               <input id={`${formId}-name`} name="name" className="input" required maxLength={80} value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Look at the photo" />
             </div>
             <label className="check"><input type="checkbox" name="include_image" checked={sees} onChange={(e) => setSees(e.target.checked)} /> Sees the photo</label>
-            <span className="hint">Model: {model ? model.label : "not chosen yet"} (set for the whole chain in <a href="#settings">Chain settings</a>).</span>
           </Section>
-          <Section title="Inputs" hint="fixed · sent to the model automatically">
+          <Section title="Inputs">
             <ul className="io-list">
-              <li><span className="io-tag">User prompt</span><span className="type">String</span><span className="hint">What the member types (&quot;none&quot; when empty)</span></li>
-              <li className={sees ? "" : "is-off"}><span className="io-tag">Image</span><span className="type">Image</span><span className="hint">{sees ? "The photo is attached" : "Not attached: tick Sees the photo in Basics"}</span></li>
+              <li><span className="io-tag">User prompt</span><span className="type">String</span></li>
+              <li className={sees ? "" : "is-off"} title={sees ? undefined : "Tick Sees the photo in Basics"}><span className="io-tag">Image</span><span className="type">Image</span></li>
               {before.map((b, i) => (
                 <li key={i}><span className="io-tag">{`Step ${i + 1} output`}</span><span className="type">{b.output_kind === "captions" ? "JSON" : "String"}</span><span className="hint">{b.name}</span></li>
               ))}
             </ul>
-            <details>
-              <summary className="hint" style={{ cursor: "pointer" }}>What the model receives</summary>
-              <pre className="prompt" aria-label="Generated input">{template}</pre>
-            </details>
           </Section>
           <Section title="Prompt" action={<button type="button" className="btn btn-icon" aria-label="Expand the prompt" title="Expand" onClick={() => setExpanded(true)}>⤢</button>}>
             <textarea name="system_prompt" className="textarea" aria-label="Prompt" required maxLength={20000} rows={10} value={system} onChange={(e) => setSystem(e.target.value)}
               placeholder={position === 1
                 ? "What this step should do with the photo and the member's input.\n\nExample:\nYou describe photos for a comedy writer. In 3 to 5 sentences, say who or what is in it, where it is and anything odd. If the user input is not \"none\", mention what relates to it."
                 : "What this step should do with the inputs above.\n\nExample:\nFrom the photo description, list 5 comic angles, one short line each. If the user input is not \"none\", every angle must center on it."} />
-            <span className="hint">≈ {(estimateTokens(system) + estimateTokens(template)).toLocaleString("en-US")} tokens of text{sees ? " + the photo" : ""}. The inputs are added after it automatically; no {"{…}"} needed.</span>
           </Section>
           <Section title="Output">
             {kind === "captions" ? (
               <>
-                <p style={{ margin: 0 }}><span className="io-tag">Captions</span> <span className="type">JSON</span> <span className="hint">The last step returns the four captions, e.g. {"{\"captions\": [{\"caption\": \"…\", \"style\": \"deadpan\"}]}"}.</span></p>
+                <p style={{ margin: 0 }}><span className="io-tag">Captions</span> <span className="type">JSON</span></p>
                 <details>
-                  <summary className="hint" style={{ cursor: "pointer" }}>Advanced: JSON schema (optional)</summary>
+                  <summary className="hint" style={{ cursor: "pointer" }}>JSON schema (optional)</summary>
                   <textarea name="output_schema" className="textarea mono" aria-label="Output JSON schema" rows={6} maxLength={20000} value={schema} onChange={(e) => setSchema(e.target.value)}
                     placeholder='{"type":"object","properties":{"captions":{"type":"array"}}}' style={{ marginTop: 8 }} />
                 </details>
               </>
-            ) : <p style={{ margin: 0 }}><span className="io-tag">{`Step ${position} output`}</span> <span className="type">String</span> <span className="hint">Text passed to every later step.</span></p>}
+            ) : <p style={{ margin: 0 }}><span className="io-tag">{`Step ${position} output`}</span> <span className="type">String</span></p>}
           </Section>
           {step && <div ref={tryBox}><StepTry position={position} template={template} sees={sees} sample={sample} /></div>}
         </form>

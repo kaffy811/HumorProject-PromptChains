@@ -183,7 +183,8 @@ try {
         for (const text of ["User prompt", "Image", "Step 1 output", "Describe the photo"]) assert.match(inputs, new RegExp(text), `inputs: ${text}`);
         assert.equal(await panel.getByRole("textbox", { name: "User prompt" }).count(), 0, "no user prompt to write");
         assert.equal(await panel.locator("select[name=output_kind]").count(), 0, "output is automatic");
-        assert.match(await panel.locator("pre[aria-label='Generated input']").textContent(), /User input: \{direction\}\s+Step 1 output \(Describe the photo\):\s+\{step1\}/);
+        assert.equal(await panel.getByText("What the model receives").count(), 0, "generated input is not shown");
+        assert.doesNotMatch(await panel.locator(".panel-body").textContent(), /\{(direction|previous|step\d)\}|\{…\}/, "no {…} notes");
         const promptBox = panel.getByRole("textbox", { name: "Prompt", exact: true });
         await promptBox.fill("From the photo description, list 5 comic angles.");
         await panel.getByText("Unsaved", { exact: true }).waitFor();
