@@ -35,7 +35,7 @@ export function StepPanel({ chainId, step, position, insertAt, total, model, bef
   const [message, setMessage] = useState<{ kind: "good" | "bad"; text: string } | null>(null);
   const [pending, start] = useTransition();
   const kind = stepKind(position, total);
-  const template = stepTemplate(position, before.map((b) => b.name));
+  const template = stepTemplate(position, before.map((b) => b.name), kind === "captions");
   const dirty = !step
     ? !!(name || system)
     : name !== step.name || sees !== step.include_image || system !== step.system_prompt || (kind === "captions" && schema !== schemaText(step.output_schema));
@@ -110,10 +110,10 @@ export function StepPanel({ chainId, step, position, insertAt, total, model, bef
           </Section>
           <Section title="Inputs">
             <ul className="io-list">
-              <li><span className="io-tag">User prompt</span><span className="type">String</span></li>
-              <li className={sees ? "" : "is-off"} title={sees ? undefined : "Tick Sees the photo in Basics"}><span className="io-tag">Image</span><span className="type">Image</span></li>
+              <li><span className="io-tag" translate="no">User prompt</span><span className="type" translate="no">String</span></li>
+              <li className={sees ? "" : "is-off"} title={sees ? undefined : "Tick Sees the photo in Basics"}><span className="io-tag" translate="no">Image</span><span className="type" translate="no">Image</span></li>
               {before.map((b, i) => (
-                <li key={i}><span className="io-tag">{`Step ${i + 1} output`}</span><span className="type">{b.output_kind === "captions" ? "JSON" : "String"}</span><span className="hint">{b.name}</span></li>
+                <li key={i}><span className="io-tag" translate="no">{`Step ${i + 1} output`}</span><span className="type" translate="no">{b.output_kind === "captions" ? "JSON" : "String"}</span><span className="hint">{b.name}</span></li>
               ))}
             </ul>
           </Section>
@@ -126,14 +126,14 @@ export function StepPanel({ chainId, step, position, insertAt, total, model, bef
           <Section title="Output">
             {kind === "captions" ? (
               <>
-                <p style={{ margin: 0 }}><span className="io-tag">Captions</span> <span className="type">JSON</span></p>
+                <p style={{ margin: 0 }}><span className="io-tag" translate="no">Captions</span> <span className="type" translate="no">JSON</span></p>
                 <details>
                   <summary className="hint" style={{ cursor: "pointer" }}>JSON schema (optional)</summary>
                   <textarea name="output_schema" className="textarea mono" aria-label="Output JSON schema" rows={6} maxLength={20000} value={schema} onChange={(e) => setSchema(e.target.value)}
                     placeholder='{"type":"object","properties":{"captions":{"type":"array"}}}' style={{ marginTop: 8 }} />
                 </details>
               </>
-            ) : <p style={{ margin: 0 }}><span className="io-tag">{`Step ${position} output`}</span> <span className="type">String</span></p>}
+            ) : <p style={{ margin: 0 }}><span className="io-tag" translate="no">{`Step ${position} output`}</span> <span className="type" translate="no">String</span></p>}
           </Section>
           {step && <div ref={tryBox}><StepTry position={position} template={template} sees={sees} sample={sample} /></div>}
         </form>

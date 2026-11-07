@@ -72,7 +72,7 @@ async function callOpenAIOnce(input: StepCall, key: string, fetcher: Fetch) {
   if (input.image) content.push({ type: "image_url", image_url: { url: `data:${input.image.mime};base64,${input.image.base64}` } });
   const body: Record<string, unknown> = {
     model: input.model,
-    messages: [{ role: "system", content: input.systemPrompt }, { role: "user", content }],
+    messages: [{ role: "system", content: jsonModeSystem(input.systemPrompt, input.userPrompt, input.json && !input.schema) }, { role: "user", content }],
   };
   if (input.json) body.response_format = input.schema ? { type: "json_schema", json_schema: { name: "captions", strict: true, schema: input.schema } } : { type: "json_object" };
   if (input.maxOutputTokens) body.max_completion_tokens = input.maxOutputTokens;
@@ -111,4 +111,10 @@ export function parseCaptions(text: string): { ok: true; captions: Caption[] } |
   }).filter((c) => c.caption);
   if (!captions.length) return { ok: false, error: "The final step returned only empty captions." };
   return { ok: true, captions: captions.slice(0, 20) };
+}
+
+// OpenAI's JSON mode refuses a request whose messages never mention JSON; a
+// prompt that forgot to say so still gets an answer.
+export function jsonModeSystem(system: string, user: string, json: boolean) {
+  return json && !/json/i.test(`${system}\n${user}`) ? `${system.trimEnd()}\n\nRespond with JSON.` : system;
 }

@@ -243,7 +243,7 @@ import { canvasLayout, orderAfterConnect, stepInputs } from "../lib/canvas";
 
 // Simple steps: generated inputs (member input + every earlier output once), output kind by position,
 // and old hand-written user prompts turned into Prompt instructions.
-import { instructionsFrom, isAutoTemplate, simpleStep, stepKind, stepTemplate } from "../lib/chain-rules";
+import { instructionsFrom, isAutoTemplate, OUTPUT_RULE, simpleStep, stepKind, stepTemplate } from "../lib/chain-rules";
 {
   assert.equal(stepTemplate(1, []), "User input: {direction}");
   assert.equal(stepTemplate(3, ["Look at the photo", "Find {the} angles"]),
@@ -260,5 +260,23 @@ import { instructionsFrom, isAutoTemplate, simpleStep, stepKind, stepTemplate } 
   assert.equal(converted.user_prompt, "User input: {direction}\n\nStep 1 output (Look at the photo):\n{step1}");
   assert.deepEqual(simpleStep(converted, 2, ["Look at the photo"]), converted, "converting twice changes nothing");
   assert.equal(simpleStep({ system_prompt: "P", user_prompt: stepTemplate(2, ["old name"]) }, 2, ["new name"]).system_prompt, "P", "a renamed step only regenerates its inputs");
+  // The last step's input ends with the output rule (four styled captions, and the word JSON).
+  const lastTemplate = stepTemplate(2, ["Look"], true);
+  assert.ok(lastTemplate.endsWith(`\n\n${OUTPUT_RULE}`) && /JSON/.test(lastTemplate) && /exactly 4 captions/.test(lastTemplate));
+  assert.ok(isAutoTemplate(lastTemplate), "still recognised as generated");
+  assert.equal(simpleStep({ system_prompt: "P", user_prompt: stepTemplate(2, ["Look"]) }, 2, ["Look"], true).user_prompt, lastTemplate, "becoming last adds the rule");
+  assert.equal(simpleStep({ system_prompt: "P", user_prompt: lastTemplate }, 2, ["Look"], false).system_prompt, "P", "no longer last: the rule is dropped, not moved into the Prompt");
+  assert.equal(fillPrompt(lastTemplate, "subway", ["a panda"]).split("\n")[0], "User input: subway");
+  assert.match(fillPrompt(lastTemplate, "", ["x"]), /\{"captions":\[\{"caption":"\.\.\.","style":"deadpan"\}\]\}$/, "the JSON example is not a placeholder");
   console.log("PASS simple steps: generated inputs, output kind and conversion.");
+}
+
+// OpenAI's JSON mode needs the word JSON somewhere in the messages.
+import { jsonModeSystem } from "../lib/llm";
+{
+  assert.equal(jsonModeSystem("Write captions.", "User input: x", true), "Write captions.\n\nRespond with JSON.");
+  assert.equal(jsonModeSystem("Return JSON only.", "x", true), "Return JSON only.");
+  assert.equal(jsonModeSystem("Write captions.", "Format as json", true), "Write captions.");
+  assert.equal(jsonModeSystem("Describe.", "x", false), "Describe.", "text steps unchanged");
+  console.log("PASS JSON mode guard.");
 }
