@@ -116,3 +116,36 @@ export function chainModelOf(own: string | null | undefined, steps: { position: 
   const id = own ?? common;
   return { id, mixed: steps.some((s) => s.llm_model_id !== id) && steps.length > 0 };
 }
+
+// Simple steps: admins write one Prompt (the system prompt) per step; what the
+// model receives as the user message is built automatically and the same way
+// everywhere (tool, Humor Admin, member app read it as an ordinary template):
+// the member's input, then every earlier step's output once, by name.
+// Migration 202611070002 builds the identical text in SQL.
+export function stepTemplate(position: number, earlierNames: string[]) {
+  const parts = ["User input: {direction}"];
+  for (let k = 1; k < position; k++) parts.push(`Step ${k} output (${(earlierNames[k - 1] ?? `Step ${k}`).replace(/[{}]/g, "")}):\n{step${k}}`);
+  return parts.join("\n\n");
+}
+// Earlier steps pass text on; the last one returns the captions.
+export const stepKind = (position: number, total: number): OutputKind => (position === total ? "captions" : "text");
+
+// A template stepTemplate made (whatever the step names were then).
+export function isAutoTemplate(text: string) {
+  return /^User input: \{direction\}(\n\nStep \d{1,2} output \([^\n]*\):\n\{step\d{1,2}\})*$/.test(text);
+}
+// A hand-written user prompt (older chains, older versions) turned into plain
+// instructions for the Prompt: lines with {…} go, and so does a "Label:" line
+// right before one ("Photo description:" + "{previous}").
+export function instructionsFrom(userPrompt: string) {
+  const lines = userPrompt.split("\n");
+  const has = (line: string | undefined) => line !== undefined && /\{(direction|previous|step\d{1,2})\}/.test(line);
+  const kept = lines.filter((line, i) => !has(line) && !(line.trim().endsWith(":") && has(lines[i + 1])));
+  return kept.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+}
+// The step as a simple step: Prompt (system) with any old instructions appended, generated inputs.
+export function simpleStep(step: { system_prompt: string; user_prompt: string }, position: number, earlierNames: string[]) {
+  const extra = isAutoTemplate(step.user_prompt) ? "" : instructionsFrom(step.user_prompt);
+  const system = extra && !step.system_prompt.includes(extra) ? `${step.system_prompt.trimEnd()}\n\n${extra}` : step.system_prompt;
+  return { system_prompt: system, user_prompt: stepTemplate(position, earlierNames) };
+}

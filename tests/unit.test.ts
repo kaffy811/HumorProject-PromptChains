@@ -214,7 +214,7 @@ import { chainModelOf } from "../lib/chain-rules";
 }
 
 // Canvas: only neighbours are connected; drag output → input reorders; typed variables.
-import { canvasLayout, orderAfterConnect, stepInputs, variablesFor } from "../lib/canvas";
+import { canvasLayout, orderAfterConnect, stepInputs } from "../lib/canvas";
 {
   const s = (id: string, user_prompt: string, include_image = false, output_kind = "text", name = id) => ({ id, name, user_prompt, include_image, output_kind });
   const three = [s("a", "Look. {direction}", true), s("b", "Angles on {previous}"), s("c", "{step1} / {direction}", false, "captions")];
@@ -238,13 +238,27 @@ import { canvasLayout, orderAfterConnect, stepInputs, variablesFor } from "../li
   // Inputs with types.
   assert.deepEqual(stepInputs({ include_image: true, user_prompt: "{direction} {previous} {previous} {step3}" }, 2, [{ output_kind: "captions" }]).map((i) => [i.label, i.type, i.ok]),
     [["photo", "Image", true], ["direction", "String", true], ["previous", "JSON", true], ["step3", "String", false]]);
-  // Variable picker for step 3: run inputs, then each earlier step's output and what it read.
-  const groups = variablesFor(3, three);
-  assert.deepEqual(groups.map((g) => g.title), ["Run inputs", "Step 1 · a", "Step 2 · b"]);
-  assert.deepEqual(groups[0].vars.map((v) => [v.token, v.type, v.usable]), [["{direction}", "String", true], ["photo", "Image", false]]);
-  assert.deepEqual(groups[1].vars.map((v) => v.token), ["{step1}", "{direction}"], "step 1's output, then what it read");
-  assert.deepEqual(groups[2].vars.map((v) => v.token), ["{step2}", "{previous}", "{step1}"], "{previous} for the step right before; step 2 read step 1, offered as {step1}");
-  assert.deepEqual(variablesFor(1, []).map((g) => g.title), ["Run inputs"]);
-  assert.equal(variablesFor(2, [s("a", "x", true, "captions")])[1].vars[0].type, "JSON");
-  console.log("PASS canvas layout, reorder by connection and variables.");
+  console.log("PASS canvas layout and reorder by connection.");
+}
+
+// Simple steps: generated inputs (member input + every earlier output once), output kind by position,
+// and old hand-written user prompts turned into Prompt instructions.
+import { instructionsFrom, isAutoTemplate, simpleStep, stepKind, stepTemplate } from "../lib/chain-rules";
+{
+  assert.equal(stepTemplate(1, []), "User input: {direction}");
+  assert.equal(stepTemplate(3, ["Look at the photo", "Find {the} angles"]),
+    "User input: {direction}\n\nStep 1 output (Look at the photo):\n{step1}\n\nStep 2 output (Find the angles):\n{step2}", "every earlier output once; braces in names dropped");
+  assert.deepEqual([stepKind(1, 3), stepKind(2, 3), stepKind(3, 3), stepKind(1, 1)], ["text", "text", "captions", "captions"]);
+  assert.ok(isAutoTemplate(stepTemplate(4, ["a", "b", "c"])));
+  assert.ok(!isAutoTemplate("Photo description:\n{previous}"));
+  // The members' chain before the change (migration 202611070002 does the same in SQL).
+  const old2 = "Photo description:\n{previous}\n\nThe member's direction: {direction}\n\nList 5 different comic angles on this photo.";
+  assert.equal(instructionsFrom(old2), "List 5 different comic angles on this photo.");
+  assert.equal(instructionsFrom("Describe this photo in 3 to 5 sentences.\nThe member's direction: {direction}"), "Describe this photo in 3 to 5 sentences.");
+  const converted = simpleStep({ system_prompt: "You are a comedian.", user_prompt: old2 }, 2, ["Look at the photo"]);
+  assert.equal(converted.system_prompt, "You are a comedian.\n\nList 5 different comic angles on this photo.");
+  assert.equal(converted.user_prompt, "User input: {direction}\n\nStep 1 output (Look at the photo):\n{step1}");
+  assert.deepEqual(simpleStep(converted, 2, ["Look at the photo"]), converted, "converting twice changes nothing");
+  assert.equal(simpleStep({ system_prompt: "P", user_prompt: stepTemplate(2, ["old name"]) }, 2, ["new name"]).system_prompt, "P", "a renamed step only regenerates its inputs");
+  console.log("PASS simple steps: generated inputs, output kind and conversion.");
 }

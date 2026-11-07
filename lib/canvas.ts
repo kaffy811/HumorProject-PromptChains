@@ -50,12 +50,9 @@ export function orderAfterConnect(order: string[], source: string, target: strin
 }
 
 export type VarType = "String" | "JSON" | "Image";
-export type Variable = { token: string; name: string; type: VarType; help: string; usable: boolean; why?: string };
-export type VariableGroup = { title: string; vars: Variable[] };
-type BeforeStep = { name: string; include_image: boolean; user_prompt: string; output_kind: string };
 const outputType = (kind: string): VarType => (kind === "captions" ? "JSON" : "String");
 
-// What a step reads, with types, for its card and the editor.
+// What a step reads, with types (used by checks and tests).
 export function stepInputs(step: { include_image: boolean; user_prompt: string }, position: number, before: { output_kind: string }[] = []) {
   const inputs: { token: string; label: string; type: VarType; ok: boolean }[] = [];
   if (step.include_image) inputs.push({ token: "photo", label: "photo", type: "Image", ok: true });
@@ -69,35 +66,4 @@ export function stepInputs(step: { include_image: boolean; user_prompt: string }
     inputs.push({ token: p.token, label: p.token.slice(1, -1), type, ok });
   }
   return inputs;
-}
-
-// The variable picker for the step at `position`: the run's inputs, then every
-// earlier step with what it read and what it returned. Clicking a usable
-// variable inserts its token; the photo cannot go into text.
-export function variablesFor(position: number, before: BeforeStep[]): VariableGroup[] {
-  const groups: VariableGroup[] = [{
-    title: "Run inputs",
-    vars: [
-      { token: "{direction}", name: "direction", type: "String", help: "The direction typed for the run (\"none\" when empty)", usable: true },
-      { token: "photo", name: "photo", type: "Image", help: "The run's photo", usable: false, why: "An image cannot go into text: turn on \"Sees the photo\" to attach it." },
-    ],
-  }];
-  before.slice(0, position - 1).forEach((step, i) => {
-    const n = i + 1;
-    const type = outputType(step.output_kind);
-    const json = type === "JSON" ? " It is JSON (captions) and is passed as text." : "";
-    const vars: Variable[] = [];
-    vars.push({ token: `{step${n}}`, name: `step${n}`, type, help: `Output of step ${n}.${json}`, usable: true });
-    if (n === position - 1) vars.push({ token: "{previous}", name: "previous", type, help: `Same as {step${n}}: the step right before this one.${json}`, usable: true });
-    // What that step itself read: the same values, under the names it used.
-    for (const input of stepInputs(step, n, before)) {
-      if (input.token === "photo") continue;
-      const source = input.label === "previous" ? n - 1 : input.label.startsWith("step") ? Number(input.label.slice(4)) : null;
-      const token = source ? `{step${source}}` : input.token;
-      if (vars.some((v) => v.token === token)) continue;
-      vars.push({ token, name: `${input.label} (input of step ${n})`, type: input.type, help: source ? `Step ${n} read step ${source}'s output; insert it here as ${token}.` : `Step ${n} read this too.`, usable: input.ok });
-    }
-    groups.push({ title: `Step ${n} · ${step.name}`, vars });
-  });
-  return groups;
 }

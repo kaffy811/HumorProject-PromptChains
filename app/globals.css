@@ -426,3 +426,11 @@ tr[aria-current="true"] td { background: var(--hover); }
 .chip-static.is-on { background: var(--good-bg); color: var(--good); }
 .cnode > .react-flow__handle.anchor { top: 44px; }
 .cnode-end { box-sizing: border-box; height: 64px; padding: 8px 12px; align-content: center; }
+
+/* Simple step editor: fixed inputs */
+.io-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.io-list li { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.io-list li.is-off { opacity: .55; }
+.io-tag { font: 700 11px var(--font-label); padding: 2px 7px; border: 1.5px solid var(--edge); background: var(--card); }
+.cnode-end.photo b { font-size: 12px; line-height: 1.2; }
+.cnode-end.photo .hint { font-size: 10.5px; line-height: 1.2; }

@@ -1,10 +1,9 @@
 "use client";
 import { useEffect, useId, useRef, useState, useTransition } from "react";
 import { createStep, deleteStep, updateStep } from "@/lib/actions";
-import { variablesFor, type VariableGroup } from "@/lib/canvas";
-import type { Problem } from "@/lib/chain-rules";
+import { stepKind, stepTemplate, type Problem } from "@/lib/chain-rules";
 import type { ModelOption } from "@/lib/data";
-import { PromptPreview } from "@/components/PromptPreview";
+import { estimateTokens } from "@/lib/flow";
 import { StepTry, type RunSample } from "@/components/StepTry";
 
 export type PanelStep = {
@@ -13,31 +12,34 @@ export type PanelStep = {
 };
 const schemaText = (value: unknown) => (value ? JSON.stringify(value, null, 2) : "");
 
-// The step editor beside the canvas: collapsible sections, the chain's model
-// shown (never chosen here), explicit save with an unsaved-changes marker and
-// Ctrl/⌘+S, and "Test this step". step = null adds a step at insertAt.
-export function StepPanel({ chainId, step, position, insertAt, model, before, problems, sample, onClose, onSaved, onDirty }: {
-  chainId: string; step: PanelStep | null; position: number; insertAt: number | null; model: ModelOption | null;
-  // The steps that run before this one (their names, outputs and what they read).
-  before: { name: string; include_image: boolean; user_prompt: string; output_kind: string }[];
+// The step editor beside the canvas, kept simple: Basics (name, sees the photo),
+// Inputs (fixed, shown only: the member's input, the photo when ticked, every
+// earlier step's output once), one Prompt, the Output (automatic: text passed
+// on, or the captions for the last step) and Test output. The model is the
+// chain's. Explicit save with an unsaved marker and Ctrl/⌘+S.
+// step = null adds a step at insertAt.
+export function StepPanel({ chainId, step, position, insertAt, total, model, before, problems, sample, onClose, onSaved, onDirty }: {
+  chainId: string; step: PanelStep | null; position: number; insertAt: number | null;
+  // How many steps the chain has with this one in it (decides whether it is the last).
+  total: number; model: ModelOption | null;
+  before: { name: string; output_kind: string }[];
   problems: Problem[]; sample: RunSample | null; onClose: () => void; onSaved: (id: string) => void; onDirty: (dirty: boolean) => void;
 }) {
   const formId = useId();
   const form = useRef<HTMLFormElement>(null);
-  const userBox = useRef<HTMLTextAreaElement>(null);
   const tryBox = useRef<HTMLDivElement>(null);
   const [name, setName] = useState(step?.name ?? "");
   const [sees, setSees] = useState(step ? step.include_image : position === 1);
-  const [kind, setKind] = useState(step?.output_kind ?? "text");
   const [system, setSystem] = useState(step?.system_prompt ?? "");
-  const [user, setUser] = useState(step?.user_prompt ?? "");
   const [schema, setSchema] = useState(schemaText(step?.output_schema));
-  const [expanded, setExpanded] = useState<"system" | "user" | null>(null);
+  const [expanded, setExpanded] = useState(false);
   const [message, setMessage] = useState<{ kind: "good" | "bad"; text: string } | null>(null);
   const [pending, start] = useTransition();
+  const kind = stepKind(position, total);
+  const template = stepTemplate(position, before.map((b) => b.name));
   const dirty = !step
-    ? !!(name || system || user)
-    : name !== step.name || sees !== step.include_image || kind !== step.output_kind || system !== step.system_prompt || user !== step.user_prompt || (kind === "captions" && schema !== schemaText(step.output_schema));
+    ? !!(name || system)
+    : name !== step.name || sees !== step.include_image || system !== step.system_prompt || (kind === "captions" && schema !== schemaText(step.output_schema));
   useEffect(() => { onDirty(dirty); }, [dirty, onDirty]);
   // A closed panel has nothing unsaved.
   useEffect(() => () => onDirty(false), [onDirty]);
@@ -71,19 +73,6 @@ export function StepPanel({ chainId, step, position, insertAt, model, before, pr
       else { onDirty(false); onClose(); }
     });
   };
-  const groups = variablesFor(position, before);
-  const tokens = [...new Set(groups.flatMap((g) => g.vars.filter((v) => v.usable).map((v) => v.token)))];
-  // The variable picker: from the {x} button, or after typing "{" in the user prompt (that "{" is then replaced).
-  const [picker, setPicker] = useState<"button" | "brace" | null>(null);
-  const insert = (token: string) => {
-    const box = userBox.current;
-    let from = box?.selectionStart ?? user.length;
-    const to = box?.selectionEnd ?? user.length;
-    if (picker === "brace" && user[from - 1] === "{") from -= 1;
-    setPicker(null);
-    setUser(user.slice(0, from) + token + user.slice(to));
-    requestAnimationFrame(() => { box?.focus(); box?.setSelectionRange(from + token.length, from + token.length); });
-  };
   const openTest = () => {
     const details = tryBox.current?.querySelector("details");
     if (details) details.open = true;
@@ -96,7 +85,7 @@ export function StepPanel({ chainId, step, position, insertAt, model, before, pr
         <span className="step-num" aria-hidden="true">{position}</span>
         <div style={{ minWidth: 0, flex: 1 }}>
           <h3>{step ? name || "Untitled step" : `New step ${position}`}</h3>
-          <span className="hint">{model ? model.label : "No model yet"} · {kind === "captions" ? "returns captions" : "returns text"}</span>
+          <span className="hint">{model ? model.label : "No model yet"} · {kind === "captions" ? "returns the captions" : "returns text"}</span>
         </div>
         {dirty && <span className="badge badge-warn">Unsaved</span>}
         {step && <button type="button" className="btn btn-icon" title="Test this step" aria-label="Test this step" onClick={openTest}>▶</button>}
@@ -108,87 +97,61 @@ export function StepPanel({ chainId, step, position, insertAt, model, before, pr
           <input type="hidden" name="chain_id" value={chainId} />
           {step && <input type="hidden" name="id" value={step.id} />}
           {insertAt && <input type="hidden" name="insert_at" value={insertAt} />}
+          {/* Generated, not edited: the server regenerates them for the step's position on every save. */}
+          <input type="hidden" name="user_prompt" value={template} />
+          <input type="hidden" name="output_kind" value={kind} />
           {/* Sent only for "Test this step"; saving never changes a step's model. */}
           <input type="hidden" name="llm_model_id" value={model?.id ?? ""} />
-          <div className="panel-cols"><div className="col-side">
-          <Section title="Basics" order={1}>
+          <Section title="Basics">
             <div className="field">
               <label htmlFor={`${formId}-name`}>Step name</label>
               <input id={`${formId}-name`} name="name" className="input" required maxLength={80} value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Look at the photo" />
             </div>
-            <div className="field">
-              <span className="label">Model</span>
-              <p className="model-note">{model ? model.label : "Not chosen yet"} <span className="hint">· set for the whole chain in <a href="#settings">Chain settings</a></span></p>
-            </div>
-            <div className="row" style={{ gap: 18 }}>
-              <label className="check"><input type="checkbox" name="include_image" checked={sees} onChange={(e) => setSees(e.target.checked)} /> Sees the photo</label>
-              <label className="check" htmlFor={`${formId}-kind`}>Returns
-                <select id={`${formId}-kind`} name="output_kind" className="select" value={kind} onChange={(e) => setKind(e.target.value)} style={{ width: "auto" }}>
-                  <option value="text">Text (passed on)</option>
-                  <option value="captions">Captions (final JSON)</option>
-                </select>
-              </label>
-            </div>
+            <label className="check"><input type="checkbox" name="include_image" checked={sees} onChange={(e) => setSees(e.target.checked)} /> Sees the photo</label>
+            <span className="hint">Model: {model ? model.label : "not chosen yet"} (set for the whole chain in <a href="#settings">Chain settings</a>).</span>
           </Section>
-          <Section title="Variables" hint="from the run and earlier steps · click to insert" order={2}>
-            <VariableList groups={groups} sees={sees} onPick={insert} />
+          <Section title="Inputs" hint="fixed · sent to the model automatically">
+            <ul className="io-list">
+              <li><span className="io-tag">User prompt</span><span className="type">String</span><span className="hint">What the member types (&quot;none&quot; when empty)</span></li>
+              <li className={sees ? "" : "is-off"}><span className="io-tag">Image</span><span className="type">Image</span><span className="hint">{sees ? "The photo is attached" : "Not attached: tick Sees the photo in Basics"}</span></li>
+              {before.map((b, i) => (
+                <li key={i}><span className="io-tag">{`Step ${i + 1} output`}</span><span className="type">{b.output_kind === "captions" ? "JSON" : "String"}</span><span className="hint">{b.name}</span></li>
+              ))}
+            </ul>
+            <details>
+              <summary className="hint" style={{ cursor: "pointer" }}>What the model receives</summary>
+              <pre className="prompt" aria-label="Generated input">{template}</pre>
+            </details>
           </Section>
-
-          <Section title="Output" order={5}>
+          <Section title="Prompt" action={<button type="button" className="btn btn-icon" aria-label="Expand the prompt" title="Expand" onClick={() => setExpanded(true)}>⤢</button>}>
+            <textarea name="system_prompt" className="textarea" aria-label="Prompt" required maxLength={20000} rows={10} value={system} onChange={(e) => setSystem(e.target.value)}
+              placeholder={position === 1
+                ? "What this step should do with the photo and the member's input.\n\nExample:\nYou describe photos for a comedy writer. In 3 to 5 sentences, say who or what is in it, where it is and anything odd. If the user input is not \"none\", mention what relates to it."
+                : "What this step should do with the inputs above.\n\nExample:\nFrom the photo description, list 5 comic angles, one short line each. If the user input is not \"none\", every angle must center on it."} />
+            <span className="hint">≈ {(estimateTokens(system) + estimateTokens(template)).toLocaleString("en-US")} tokens of text{sees ? " + the photo" : ""}. The inputs are added after it automatically; no {"{…}"} needed.</span>
+          </Section>
+          <Section title="Output">
             {kind === "captions" ? (
-              <div className="field">
-                <label htmlFor={`${formId}-schema`}>JSON schema <span className="muted">(optional)</span></label>
-                <textarea id={`${formId}-schema`} name="output_schema" className="textarea mono" rows={6} maxLength={20000} value={schema} onChange={(e) => setSchema(e.target.value)} placeholder='{"type":"object","properties":{"captions":{"type":"array"}}}' />
-                <span className="hint">The model must return {"{\"captions\": [...]}"}; a schema makes it stricter.</span>
-              </div>
-            ) : <p className="hint" style={{ margin: 0 }}>Plain text. Later steps read it as <span className="mono">{"{previous}"}</span> (the next step) or <span className="mono">{`{step${position}}`}</span>.</p>}
+              <>
+                <p style={{ margin: 0 }}><span className="io-tag">Captions</span> <span className="type">JSON</span> <span className="hint">The last step returns the four captions, e.g. {"{\"captions\": [{\"caption\": \"…\", \"style\": \"deadpan\"}]}"}.</span></p>
+                <details>
+                  <summary className="hint" style={{ cursor: "pointer" }}>Advanced: JSON schema (optional)</summary>
+                  <textarea name="output_schema" className="textarea mono" aria-label="Output JSON schema" rows={6} maxLength={20000} value={schema} onChange={(e) => setSchema(e.target.value)}
+                    placeholder='{"type":"object","properties":{"captions":{"type":"array"}}}' style={{ marginTop: 8 }} />
+                </details>
+              </>
+            ) : <p style={{ margin: 0 }}><span className="io-tag">{`Step ${position} output`}</span> <span className="type">String</span> <span className="hint">Text passed to every later step.</span></p>}
           </Section>
-          {step && <div ref={tryBox} style={{ order: 6 }}><StepTry position={position} template={user} sees={sees} sample={sample} /></div>}
-          </div><div className="col-main">
-          <Section title="System prompt" order={3} action={<button type="button" className="btn btn-icon" aria-label="Expand the system prompt" title="Expand" onClick={() => setExpanded("system")}>⤢</button>}>
-            <textarea name="system_prompt" className="textarea" aria-label="System prompt" required maxLength={20000} rows={8} value={system} onChange={(e) => setSystem(e.target.value)}
-              placeholder={"Who the model is and the rules it follows.\n\nExample:\nYou write captions for Columbia students. Each caption is under 25 words, with the punchline at the end. No hashtags or emojis."} />
-            <span className="hint">Fixed instructions. <b>{"{…}"} inputs are not filled here</b>: put {"{direction}"}, {"{previous}"} or {"{stepN}"} in the user prompt.</span>
-          </Section>
-          <Section title="User prompt" order={4} action={<span className="row" style={{ gap: 6 }}>
-            <button type="button" className="btn btn-sm" aria-haspopup="dialog" aria-expanded={!!picker} onClick={() => setPicker(picker ? null : "button")} title="Insert a variable from the run or an earlier step">{"{x}"} Insert variable</button>
-            <button type="button" className="btn btn-icon" aria-label="Expand the user prompt" title="Expand" onClick={() => setExpanded("user")}>⤢</button>
-          </span>}>
-            {picker && (
-              <div className="var-popover" role="dialog" aria-label="Insert a variable" onKeyDown={(e) => { if (e.key === "Escape") { e.stopPropagation(); setPicker(null); userBox.current?.focus(); } }}>
-                <div className="row" style={{ justifyContent: "space-between" }}>
-                  <b>Insert a variable</b>
-                  <button type="button" className="btn btn-icon" aria-label="Close the variable list" onClick={() => setPicker(null)}>✕</button>
-                </div>
-                <VariableList groups={groups} sees={sees} onPick={insert} autoFocus={picker === "button"} />
-              </div>
-            )}
-            <textarea ref={userBox} name="user_prompt" className="textarea" aria-label="User prompt" required maxLength={4000} rows={7} value={user}
-              onChange={(e) => {
-                const value = e.target.value, caret = e.target.selectionStart;
-                // Typing "{" opens the picker at once.
-                if (value.length === user.length + 1 && value[caret - 1] === "{") setPicker("brace");
-                setUser(value);
-              }}
-              placeholder={userExample(position, sees)} />
-            <span className="hint">
-              <b>Inputs go in curly braces {"{ }"}</b> and are replaced when the step runs: {tokens.join(", ")}{sees ? " (the photo is attached on its own)" : ""}. Type <span className="mono">{"{"}</span> or use {"{x}"} Insert variable to pick one.
-              {" "}<b>Output</b>: this step&apos;s reply{kind === "captions" ? " must be the captions JSON" : <> becomes <span className="mono">{`{step${position}}`}</span> (and <span className="mono">{"{previous}"}</span> for the next step)</>}.
-            </span>
-            <PromptPreview template={user} system={system} position={position} sees={sees} />
-          </Section>
-          </div></div>
+          {step && <div ref={tryBox}><StepTry position={position} template={template} sees={sees} sample={sample} /></div>}
         </form>
         {expanded && (
-          <div className="prompt-modal" role="dialog" aria-modal="true" aria-label={expanded === "system" ? "System prompt" : "User prompt"}
-            onKeyDown={(e) => { if (e.key === "Escape") setExpanded(null); }}>
+          <div className="prompt-modal" role="dialog" aria-modal="true" aria-label="Prompt" onKeyDown={(e) => { if (e.key === "Escape") setExpanded(false); }}>
             <div className="prompt-modal-box card">
               <div className="row" style={{ justifyContent: "space-between" }}>
-                <h3 style={{ margin: 0 }}>{expanded === "system" ? "System prompt" : "User prompt"} · step {position}</h3>
-                <button type="button" className="btn btn-sm" onClick={() => setExpanded(null)}>Done</button>
+                <h3 style={{ margin: 0 }}>Prompt · step {position}</h3>
+                <button type="button" className="btn btn-sm" onClick={() => setExpanded(false)}>Done</button>
               </div>
-              <textarea autoFocus className="textarea" value={expanded === "system" ? system : user}
-                onChange={(e) => (expanded === "system" ? setSystem : setUser)(e.target.value)} />
+              <textarea autoFocus className="textarea" value={system} onChange={(e) => setSystem(e.target.value)} />
             </div>
           </div>
         )}
@@ -205,9 +168,9 @@ export function StepPanel({ chainId, step, position, insertAt, model, before, pr
   );
 }
 
-function Section({ title, hint, action, order, children }: { title: string; hint?: string; action?: React.ReactNode; order: number; children: React.ReactNode }) {
+function Section({ title, hint, action, children }: { title: string; hint?: string; action?: React.ReactNode; children: React.ReactNode }) {
   return (
-    <details className="panel-section" open style={{ order }}>
+    <details className="panel-section" open>
       <summary>
         <span className="panel-section-title">{title}</span>
         {hint && <span className="hint">{hint}</span>}
@@ -215,41 +178,5 @@ function Section({ title, hint, action, order, children }: { title: string; hint
       </summary>
       <div className="panel-section-body">{children}</div>
     </details>
-  );
-}
-
-// Placeholder text for the user prompt: how {…} inputs work, with an example
-// using the inputs this step can actually read.
-function userExample(position: number, sees: boolean) {
-  const lines = ["What this step should do. Put inputs in curly braces { } — they are replaced when it runs:", "  {direction} = the member's direction (\"none\" when empty)"];
-  if (position > 1) lines.push("  {previous} = the output of the step before", `  {step1}…{step${position - 1}} = the output of that step`);
-  lines.push("", "Example:");
-  if (position === 1) lines.push(sees ? "Describe this photo in 3 to 5 sentences." : "List 5 everyday Columbia student moments.", "The member's direction: {direction}");
-  else lines.push("Photo description:", "{step1}", "", "Ideas so far:", "{previous}", "", "The member's direction: {direction}", "Write 4 captions from the best ideas.");
-  return lines.join("\n");
-}
-
-// Variables grouped by where they come from, each with its type. Unusable ones
-// (the photo, or something not available yet) explain why instead of inserting.
-function VariableList({ groups, sees, onPick, autoFocus = false }: { groups: VariableGroup[]; sees: boolean; onPick: (token: string) => void; autoFocus?: boolean }) {
-  return (
-    <div className="var-groups">
-      {groups.map((g, gi) => (
-        <div key={g.title} className="var-group">
-          <span className="var-group-title">{g.title}</span>
-          <ul>
-            {g.vars.map((v, vi) => (
-              <li key={v.token + v.name}>
-                {v.usable
-                  ? <button type="button" className="chip" autoFocus={autoFocus && gi === 0 && vi === 0} onClick={() => onPick(v.token)} title={`Insert ${v.token}`}>{v.token}</button>
-                  : <span className={`chip chip-static${v.token === "photo" && sees ? " is-on" : ""}`}>{v.token}</span>}
-                <span className={`type type-${v.type.toLowerCase()}`}>{v.type}</span>
-                <span className="hint">{v.token === "photo" && sees ? "Attached to this step (Sees the photo is on)." : v.usable ? v.help : v.why ?? v.help}</span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      ))}
-    </div>
   );
 }
