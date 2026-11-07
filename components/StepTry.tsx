@@ -45,12 +45,12 @@ export function StepTry({ position, template, sees, sample }: { position: number
 
   return (
     <details className="field wide try" ref={box}>
-      <summary><span className="label">▶ Test this step</span> <span className="hint">one model call with the fields above, saved or not; nothing is stored</span></summary>
+      <summary><span className="label">▶ Test output</span> <span className="hint">run this step once with the Prompt above (saved or not); nothing is stored</span></summary>
       <div className="stack-sm" style={{ marginTop: 12 }}>
         <div className="form-grid">
           <div className="field">
-            <label htmlFor={`try-dir-${position}`}>Direction</label>
-            <input id={`try-dir-${position}`} className="input" maxLength={120} value={direction} onChange={(e) => setDirection(e.target.value)} placeholder="none" />
+            <label htmlFor={`try-dir-${position}`}>User prompt <span className="muted">(optional)</span></label>
+            <input id={`try-dir-${position}`} className="input" maxLength={120} value={direction} onChange={(e) => setDirection(e.target.value)} placeholder="What a member would type, e.g. midterms week" />
           </div>
           {sees && (
             <div className="field">
@@ -61,7 +61,7 @@ export function StepTry({ position, template, sees, sample }: { position: number
           )}
           {needed.map((n) => (
             <div className="field wide" key={n}>
-              <label htmlFor={`try-s${n}-${position}`}>Output of step {n} <span className="muted">({n === position - 1 ? "{previous}" : ""}{n === position - 1 && template.includes(`{step${n}}`) ? " and " : ""}{template.includes(`{step${n}}`) ? `{step${n}}` : ""})</span></label>
+              <label htmlFor={`try-s${n}-${position}`}>{`Step ${n} output`}</label>
               <textarea id={`try-s${n}-${position}`} className="textarea" rows={4} maxLength={20000} value={samples[n] ?? ""} onChange={(e) => setSamples({ ...samples, [n]: e.target.value })}
                 placeholder={`Paste or write what step ${n} would return.`} />
             </div>
@@ -77,7 +77,7 @@ export function StepTry({ position, template, sees, sample }: { position: number
           <div className="stack-sm" aria-live="polite">
             {!result.ok && <div className="notice notice-bad" role="alert">{result.error}</div>}
             {result.captions && <ol className="captions">{result.captions.map((c, i) => <li key={i}>{c.caption}{c.style && <span className="badge" style={{ marginLeft: 8 }}>{c.style}</span>}</li>)}</ol>}
-            {result.output && !result.captions && <><span className="label">Output</span><pre className="prompt">{result.output}</pre></>}
+            {result.output && !result.captions && <><span className="label">Test output</span><pre className="prompt">{result.output}</pre></>}
             <details><summary className="hint" style={{ cursor: "pointer" }}>Prompt sent</summary><pre className="prompt">{result.prompt}</pre></details>
           </div>
         )}

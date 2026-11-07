@@ -7,7 +7,7 @@ import {
   getStraightPath, useReactFlow, useViewport, type Connection, type Edge, type EdgeProps, type Node, type NodeProps,
 } from "@xyflow/react";
 import { reorderSteps } from "@/lib/actions";
-import { canvasLayout, orderAfterConnect, stepInputs, END_W, NODE_W, type CanvasEdge } from "@/lib/canvas";
+import { canvasLayout, orderAfterConnect, END_W, NODE_W, type CanvasEdge } from "@/lib/canvas";
 import { chainProblems, moveStep, type Problem } from "@/lib/chain-rules";
 import type { ModelOption } from "@/lib/data";
 import { providerLabel } from "@/components/ChainCard";
@@ -114,7 +114,7 @@ function Canvas({ chainId, chainName, steps, model, supported, sample }: CanvasP
     // End nodes are 64px tall: their centre lines up with the steps' anchors (44px below a 6px top border).
     : { id: n.id, type: n.type, position: { x: n.x, y: 18 }, draggable: false, selectable: false, width: END_W,
         data: n.type === "photo"
-          ? { label: "📷 Photo", detail: `${ordered.filter((s) => s.include_image).length} step(s) see it` }
+          ? { label: "📷 Image + ✍ User prompt", detail: `input · ${ordered.filter((s) => s.include_image).length} step(s) see the image` }
           : { label: "✦ Captions", detail: ordered.at(-1)?.output_kind === "captions" ? "from the last step" : "last step returns text" } satisfies EndData });
   const edges: Edge[] = layout.edges.map((e) => ({
     id: e.id, source: e.source, target: e.target, type: "flow", data: e, sourceHandle: "r", targetHandle: "l",
@@ -197,7 +197,7 @@ function Canvas({ chainId, chainName, steps, model, supported, sample }: CanvasP
           <aside className="chain-panel" aria-label={panelStep ? `Edit step ${panelPosition}` : `New step ${panelPosition}`}>
             <div className="panel-resize" role="separator" aria-orientation="vertical" aria-label="Resize the step editor" onPointerDown={resize} />
             <StepPanel key={panelStep ? `${panelStep.id}:${panelPosition}` : `new:${draftAt}`} chainId={chainId} step={panelStep} position={panelPosition}
-              insertAt={panelStep ? null : draftAt} model={model} before={ordered.slice(0, panelPosition - 1)}
+              insertAt={panelStep ? null : draftAt} total={panelStep ? ordered.length : ordered.length + 1} model={model} before={ordered.slice(0, panelPosition - 1)}
               problems={problems.filter((p) => panelStep && p.position === panelPosition)} sample={sample}
               onClose={close} onSaved={onSaved} onDirty={onDirty} />
           </aside>
@@ -232,7 +232,6 @@ const StepNode = memo(function StepNode({ id, data }: NodeProps<StepNodeType>) {
   const { step, index, problems, selected, before, lastRun } = data;
   const n = index + 1;
   const blocking = problems.some((p) => p.blocking);
-  const inputs = stepInputs(step, n, before);
   // Status: not set up (no model) › problem › last run › ready.
   const status = !step.model ? { label: "Not set up", tone: "warn" }
     : blocking ? { label: "Problem", tone: "bad" }
@@ -260,7 +259,11 @@ const StepNode = memo(function StepNode({ id, data }: NodeProps<StepNodeType>) {
       <span className={`cnode-status${status.tone ? ` tone-${status.tone}` : ""}`}>{status.label}</span>
       <dl className="cnode-rows">
         <dt>Input</dt>
-        <dd>{inputs.length ? inputs.map((i) => <span key={i.token} className={`tag${i.ok ? "" : " tag-bad"}`} title={i.ok ? undefined : "Not available at this position"}>{i.label} <i>{i.type}</i></span>) : <span className="muted">none</span>}</dd>
+        <dd>
+          <span className="tag">user prompt <i>String</i></span>
+          {step.include_image && <span className="tag">image <i>Image</i></span>}
+          {before.map((b, i) => <span key={i} className="tag" title={`Output of step ${i + 1}`}>step{i + 1} <i>{b.output_kind === "captions" ? "JSON" : "String"}</i></span>)}
+        </dd>
         <dt>Output</dt>
         <dd><span className={`tag${step.output_kind === "captions" ? " tag-brand" : ""}`}>{step.output_kind === "captions" ? <>captions <i>JSON</i></> : <>step{n} <i>String</i></>}</span></dd>
         <dt>Model</dt>

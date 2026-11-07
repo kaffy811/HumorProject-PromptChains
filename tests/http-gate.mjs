@@ -176,27 +176,18 @@ try {
         const panel = page.locator(".chain-panel");
         await panel.getByRole("heading", { name: "Find the funny" }).waitFor();
         assert.equal(await panel.locator("select[name=llm_model_id]").count(), 0, "no model picker in the step editor");
-        await panel.locator("mark.ph-ok", { hasText: "{previous}" }).waitFor();
-        await panel.getByRole("textbox", { name: "User prompt" }).fill("Use {previous} and {step3}");
-        await panel.locator("mark.ph-bad", { hasText: "{step3}" }).waitFor();
+        // Simple editor: fixed inputs (shown only), one Prompt, automatic output, Test output.
+        const sections = await panel.locator(".panel-section-title").allTextContents();
+        assert.deepEqual(sections, ["Basics", "Inputs", "Prompt", "Output"], "only these sections (plus Test output)");
+        const inputs = await panel.locator(".io-list").textContent();
+        for (const text of ["User prompt", "Image", "Step 1 output", "Describe the photo"]) assert.match(inputs, new RegExp(text), `inputs: ${text}`);
+        assert.equal(await panel.getByRole("textbox", { name: "User prompt" }).count(), 0, "no user prompt to write");
+        assert.equal(await panel.locator("select[name=output_kind]").count(), 0, "output is automatic");
+        assert.match(await panel.locator("pre[aria-label='Generated input']").textContent(), /User input: \{direction\}\s+Step 1 output \(Describe the photo\):\s+\{step1\}/);
+        const promptBox = panel.getByRole("textbox", { name: "Prompt", exact: true });
+        await promptBox.fill("From the photo description, list 5 comic angles.");
         await panel.getByText("Unsaved", { exact: true }).waitFor();
         await page.screenshot({ path: `${process.env.SCREENSHOTS}/light-canvas-panel.png` });
-        // Ctrl/⌘+S saves; inputs insert at the cursor; ⤢ opens the big editor.
-        await panel.getByRole("button", { name: "{direction}" }).first().click();
-        assert.match(await panel.getByRole("textbox", { name: "User prompt" }).inputValue(), /\{direction\}/);
-        // Typing "{" opens the variable picker; picking replaces that "{".
-        const userBox = panel.getByRole("textbox", { name: "User prompt" });
-        await userBox.fill("Angles: ");
-        await userBox.press("End");
-        await userBox.press("{");
-        const picker = panel.getByRole("dialog", { name: "Insert a variable" });
-        await picker.waitFor();
-        assert.match(await picker.textContent(), /Run inputs.*Step 1 · Describe the photo/s, "grouped by where variables come from");
-        assert.match(await picker.textContent(), /Image/); assert.match(await picker.textContent(), /String/);
-        await page.screenshot({ path: `${process.env.SCREENSHOTS}/light-picker.png` });
-        await picker.getByRole("button", { name: "{step1}" }).click();
-        assert.equal(await userBox.inputValue(), "Angles: {step1}", "the typed { is replaced by the variable");
-        assert.equal(await panel.getByRole("button", { name: /Full page/ }).count(), 0, "no full-page button in the editor");
         // Full screen: the whole Steps area (canvas + editor); Esc returns.
         await page.getByRole("button", { name: "⤢ Full screen" }).click();
         await page.locator(".canvas-wrap.is-fullscreen .chain-panel").waitFor();
@@ -204,16 +195,16 @@ try {
         await page.screenshot({ path: `${process.env.SCREENSHOTS}/light-fullscreen.png` });
         await page.keyboard.press("Escape");
         await page.locator(".canvas-wrap:not(.is-fullscreen)").waitFor();
-        await panel.getByRole("button", { name: "Expand the system prompt" }).click();
-        await page.getByRole("dialog", { name: "System prompt" }).waitFor();
+        await panel.getByRole("button", { name: "Expand the prompt" }).click();
+        await page.getByRole("dialog", { name: "Prompt" }).waitFor();
         await page.getByRole("button", { name: "Done" }).click();
         writes.length = 0;
         await page.keyboard.press("Control+s");
         await panel.getByText("Step saved.").waitFor({ timeout: 10000 });
-        const patch = writes.find((w) => w.method === "PATCH" && w.path.endsWith("humor_prompt_chain_steps"));
-        assert.ok(patch && patch.body.user_prompt === "Angles: {step1}" && !("llm_model_id" in patch.body), "saved prompt, never the model");
+        const patch = writes.find((w) => w.method === "PATCH" && w.path.endsWith("humor_prompt_chain_steps") && "system_prompt" in (w.body ?? {}));
+        assert.ok(patch && patch.body.system_prompt === "From the photo description, list 5 comic angles." && !("llm_model_id" in patch.body) && !("user_prompt" in patch.body), "saved the Prompt; inputs and model are not set by the form");
         // Switching steps with unsaved changes asks first.
-        await panel.getByRole("textbox", { name: "User prompt" }).fill("Changed again {previous}");
+        await promptBox.fill("Changed again");
         await page.getByRole("button", { name: "Fit" }).click();
         await page.waitForTimeout(300);
         page.once("dialog", (d) => d.dismiss());
@@ -223,6 +214,7 @@ try {
         await page.goto(`${ORIGIN}/chains/${CHAIN}`);
         await page.getByRole("button", { name: "Test step 2" }).click();
         const tryBox = page.locator(".chain-panel details.try");
+        await tryBox.getByLabel(/User prompt/).waitFor();
         await tryBox.locator("textarea").first().waitFor();
         assert.match(await tryBox.locator("textarea").first().inputValue(), /asleep face-down/, "earlier output prefilled from the latest run");
         await tryBox.getByRole("button", { name: "Run this step" }).click();
@@ -232,14 +224,13 @@ try {
         await page.goto(`${ORIGIN}/chains/${CHAIN}`);
         await page.getByRole("button", { name: "Insert a step before step 2" }).click();
         await panel.getByRole("heading", { name: "New step 2" }).waitFor();
-        // Empty prompt boxes explain {…} inputs with the ones this position can use.
-        const hintText = await panel.getByRole("textbox", { name: "User prompt" }).getAttribute("placeholder");
-        assert.match(hintText, /curly braces/); assert.match(hintText, /\{previous\}/); assert.match(hintText, /\{direction\}/);
-        assert.match(await panel.getByRole("textbox", { name: "System prompt" }).getAttribute("placeholder"), /Example/);
+        // A new step in the middle reads the user prompt and step 1; its output is text.
+        assert.match(await panel.locator(".io-list").textContent(), /Step 1 output/);
+        assert.doesNotMatch(await panel.locator(".io-list").textContent(), /Step 2 output/);
+        assert.match(await panel.getByRole("textbox", { name: "Prompt", exact: true }).getAttribute("placeholder"), /Example/);
         await page.screenshot({ path: `${process.env.SCREENSHOTS}/light-new-step.png` });
         await panel.getByLabel("Step name").fill("Pick the best angle");
-        await panel.getByRole("textbox", { name: "System prompt" }).fill("You are a comedy editor.");
-        await panel.getByRole("textbox", { name: "User prompt" }).fill("From {previous}, pick one angle. {direction}");
+        await panel.getByRole("textbox", { name: "Prompt", exact: true }).fill("You are a comedy editor. Pick the best angle.");
         writes.length = 0;
         await panel.getByRole("button", { name: "Add step" }).click();
         await page.waitForFunction(() => !document.querySelector(".chain-panel"), null, { timeout: 10000 });
